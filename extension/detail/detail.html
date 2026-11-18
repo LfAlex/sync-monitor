@@ -1,0 +1,39 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>动态详情 · Sync Monitor</title>
+  <link rel="stylesheet" href="detail.css">
+</head>
+<body>
+  <header class="topbar">
+    <div class="brand">Sync Monitor</div>
+    <div class="headline">
+      <h1 id="monitorName">动态详情</h1>
+      <a id="homeLink" href="#" target="_blank" rel="noreferrer" class="home-link">打开监控主页 ↗</a>
+      <button id="refreshBtn" class="refresh-btn" type="button">重新采集</button>
+    </div>
+    <div id="meta" class="meta"></div>
+  </header>
+
+  <nav id="tabs" class="tabs"></nav>
+
+  <main id="list" class="list"></main>
+
+  <template id="itemTemplate">
+    <article class="item">
+      <div class="item-head">
+        <span class="time"></span>
+        <span class="badge-new">新动态</span>
+      </div>
+      <p class="content"></p>
+      <div class="item-foot">
+        <a class="origin" target="_blank" rel="noreferrer">阅读原文 ↗</a>
+      </div>
+    </article>
+  </template>
+
+  <script src="detail.js" type="module"></script>
+</body>
+</html>

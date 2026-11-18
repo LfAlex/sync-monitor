@@ -1,0 +1,38 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>动态内容 · Sync Monitor</title>
+  <link rel="stylesheet" href="detail.css">
+</head>
+<body>
+  <header class="topbar">
+    <div class="brand">Sync Monitor</div>
+    <div class="headline">
+      <h1 id="monitorName">动态内容</h1>
+      <a id="backLink" href="#" class="home-link">← 返回动态列表</a>
+    </div>
+    <div id="meta" class="meta"></div>
+  </header>
+
+  <main class="list">
+    <article id="card" class="item item-full" hidden>
+      <div class="item-head"><span id="time" class="time"></span></div>
+      <p id="content" class="content"></p>
+      <div id="images" class="images"></div>
+      <div class="item-foot">
+        <a id="origin" class="origin" target="_blank" rel="noreferrer">阅读原文 ↗</a>
+      </div>
+    </article>
+    <div id="empty" class="empty" hidden></div>
+  </main>
+
+  <div id="imageViewer" class="image-viewer" hidden role="dialog" aria-modal="true" aria-label="查看动态配图">
+    <button id="closeImageViewer" class="image-viewer-close" type="button" aria-label="关闭图片">×</button>
+    <img id="imageViewerImg" alt="动态配图大图" referrerpolicy="no-referrer">
+  </div>
+
+  <script src="item.js" type="module"></script>
+</body>
+</html>

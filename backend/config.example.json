@@ -1,0 +1,99 @@
+{
+  "server": {
+    "host": "127.0.0.1",
+    "port": 8787
+  },
+  "storage": {
+    "dbPath": "data/monitor.db"
+  },
+  "serverchan": {
+    "enabled": true,
+    "sendKey": "请填入你的 Server酱 SendKey（也可用环境变量 SERVERCHAN_SENDKEY 覆盖）",
+    "apiBase": "https://sctapi.ftqq.com"
+  },
+  "browser": {
+    "executable": "",
+    "headless": true,
+    "timeoutMs": 45000
+  },
+  "defaults": {
+    "intervalSec": 300
+  },
+  "monitors": [
+    {
+      "id": "ths_demo",
+      "name": "同花顺 · 某用户主页",
+      "url": "https://t.10jqka.com.cn/lgt/user_page/?user_code=你的user_code",
+      "type": "browser",
+      "enabled": false,
+      "intervalSec": 300,
+      "browser": {
+        "pageUrl": "https://t.10jqka.com.cn/lgt/user_page/?user_code=你的user_code",
+        "waitMs": 2500,
+        "waitCookie": "v",
+        "api": {
+          "url": "/user_center/open/api/content/v2/get_by_uid",
+          "method": "POST",
+          "headers": {
+            "Content-Type": "application/json"
+          },
+          "body": {
+            "user_code": "你的user_code"
+          }
+        }
+      },
+      "json": {
+        "listPath": "data.contents",
+        "idPath": "info.id",
+        "contentPath": "abstract.content",
+        "timePath": "info.ctime",
+        "timeFormat": "ms",
+        "linkPath": "info.jump_url"
+      },
+      "note": "同花顺主页模板：把 user_code 换成目标用户即可。"
+    },
+    {
+      "id": "rss_demo",
+      "name": "示例 RSS",
+      "url": "https://www.ruanyifeng.com/blog/atom.xml",
+      "type": "rss",
+      "enabled": false,
+      "intervalSec": 600,
+      "note": "任意 RSS/Atom 订阅源。"
+    },
+    {
+      "id": "html_demo",
+      "name": "示例 HTML 列表页",
+      "url": "https://example.com/news",
+      "type": "html",
+      "enabled": false,
+      "intervalSec": 900,
+      "html": {
+        "itemSelector": "li.news-item",
+        "titleSelector": ".title",
+        "linkSelector": "a[href]",
+        "timeSelector": ".time",
+        "contentSelector": ".summary"
+      },
+      "note": "普通列表页：配置列表项、标题、链接、时间的选择器。"
+    },
+    {
+      "id": "json_demo",
+      "name": "示例 JSON 接口",
+      "url": "https://example.com/api/list",
+      "type": "json",
+      "enabled": false,
+      "intervalSec": 600,
+      "json": {
+        "listPath": "data.list",
+        "idPath": "id",
+        "titlePath": "title",
+        "contentPath": "content",
+        "timePath": "create_time",
+        "linkPath": "url",
+        "timeFormat": "ms"
+      },
+      "note": "公开 JSON 接口：按点号路径取值。"
+    }
+  ]
+}
