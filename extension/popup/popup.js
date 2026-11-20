@@ -78,6 +78,7 @@ function render() {
     ? `${state.monitors.length} 个监控项${unread ? ` · ${unread} 条未读` : ''}`
     : '还没有监控项';
   $('emptyTip').classList.toggle('hidden', state.monitors.length > 0);
+  $('checkAll').disabled = state.monitors.length === 0;
 
   for (const monitor of state.monitors) {
     list.appendChild(renderCard(monitor, state.results[monitor.id] || {}));
@@ -217,6 +218,7 @@ function fillJsonDefaults() {
 }
 
 function openForm(monitor = null) {
+  closeQuickAdd();
   editingId = monitor ? monitor.id : null;
   $('formTitle').textContent = monitor ? '编辑监控项' : '添加监控项';
   $('fId').value = monitor ? monitor.id : '';
@@ -252,8 +254,9 @@ function openForm(monitor = null) {
   $('fApiMethod').value = pageapi.method || 'POST';
   $('fApiBody').value = pageapi.body ? JSON.stringify(pageapi.body, null, 2) : '';
 
-  $('fHeaders').value = monitor && monitor.headers && Object.keys(monitor.headers).length
-    ? JSON.stringify(monitor.headers, null, 2)
+  const requestHeaders = monitor && monitor.type === 'pageapi' ? pageapi.headers : monitor && monitor.headers;
+  $('fHeaders').value = requestHeaders && Object.keys(requestHeaders).length
+    ? JSON.stringify(requestHeaders, null, 2)
     : '';
 
   $('testResult').classList.add('hidden');
@@ -348,6 +351,66 @@ function applyThsPreset() {
   updateAdvancedVisibility();
 }
 
+function buildQuickThsMonitor(code) {
+  const pageUrl = `https://t.10jqka.com.cn/lgt/user_page/?user_code=${code}`;
+  const template = state.monitors.find((monitor) => monitor.type === 'pageapi'
+    && monitor.pageapi && monitor.pageapi.url === '/user_center/open/api/content/v2/get_by_uid');
+  if (template) {
+    const { id, createdAt, name, url, headers, json, pageapi, ...rest } = template;
+    return {
+      ...rest,
+      name: `同花顺 · ${code}`,
+      url: pageUrl,
+      enabled: true,
+      headers: { ...(headers || {}) },
+      json: { ...(json || {}) },
+      pageapi: {
+        ...pageapi,
+        pageUrl,
+        headers: { ...(pageapi.headers || {}) },
+        body: { user_code: code }
+      }
+    };
+  }
+  return {
+    name: `同花顺 · ${code}`,
+    url: pageUrl,
+    type: 'pageapi',
+    enabled: true,
+    intervalSec: state.settings.defaultIntervalSec || 300,
+    pageapi: {
+      pageUrl,
+      url: '/user_center/open/api/content/v2/get_by_uid',
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: { user_code: code }
+    },
+    json: {
+      listPath: 'data.contents',
+      idPath: 'info.id',
+      titlePath: '',
+      contentPath: 'abstract.content',
+      imagesPath: 'image.urls',
+      timePath: 'info.ctime',
+      timeFormat: 'ms',
+      linkPath: 'info.jump_url',
+      itemLimit: 30
+    }
+  };
+}
+
+function closeQuickAdd() {
+  $('quickAddPanel').classList.add('hidden');
+}
+
+function openQuickAdd() {
+  closeForm();
+  $('quickUserId').value = '';
+  $('quickAddPanel').classList.remove('hidden');
+  $('quickAddPanel').scrollIntoView({ behavior: 'smooth', block: 'start' });
+  $('quickUserId').focus();
+}
+
 /* ------------------------------------------------------------------ */
 /* 设置                                                                */
 /* ------------------------------------------------------------------ */
@@ -371,7 +434,67 @@ async function loadState() {
 /* 事件绑定                                                            */
 /* ------------------------------------------------------------------ */
 
-$('showForm').addEventListener('click', () => openForm());
+$('checkAll').addEventListener('click', async () => {
+  const button = $('checkAll');
+  button.disabled = true;
+  button.textContent = '检查中…';
+  try {
+    const next = await send('CHECK_ALL_MONITORS');
+    state = next;
+    render();
+    const checks = next.checks || [];
+    const failed = checks.filter((item) => !item.result || item.result.ok === false);
+    if (failed.length) {
+      const details = failed.map((item) => {
+        const monitor = next.monitors.find((entry) => entry.id === item.id);
+        const message = (item.result && item.result.message) || '正在检查中，请稍后重试';
+        return `${monitor ? monitor.name : item.id}：${message}`;
+      }).join('\n');
+      alert(`检查完成：${checks.length - failed.length} 个成功，${failed.length} 个失败\n${details}`);
+    } else {
+      alert(`已检查 ${checks.length} 个监控项，全部成功`);
+    }
+  } catch (error) {
+    alert(error.message);
+  } finally {
+    button.disabled = state.monitors.length === 0;
+    button.textContent = '立即检查';
+  }
+});
+
+$('showForm').addEventListener('click', openQuickAdd);
+$('cancelQuickAdd').addEventListener('click', closeQuickAdd);
+$('advancedAdd').addEventListener('click', () => {
+  const code = $('quickUserId').value.trim();
+  openForm();
+  if (/^[\w]+$/.test(code)) {
+    $('fUrl').value = `https://t.10jqka.com.cn/lgt/user_page/?user_code=${code}`;
+    applyThsPreset();
+  }
+});
+$('saveQuickMonitor').addEventListener('click', async () => {
+  const button = $('saveQuickMonitor');
+  button.disabled = true;
+  try {
+    const code = $('quickUserId').value.trim();
+    if (!/^[\w]+$/.test(code)) throw new Error('请输入正确的同花顺用户 ID');
+    const result = await send('ADD_MONITOR', { monitor: buildQuickThsMonitor(code) });
+    state = result;
+    render();
+    fillSettings();
+    closeQuickAdd();
+    const check = result.check || {};
+    if (check.ok && check.baseline) alert('已保存，并建立基线（不会提示历史动态）');
+    else if (check && check.ok === false) alert(`已保存，但首次检查失败：${check.message}`);
+  } catch (error) {
+    alert(error.message);
+  } finally {
+    button.disabled = false;
+  }
+});
+$('quickUserId').addEventListener('keydown', (event) => {
+  if (event.key === 'Enter') $('saveQuickMonitor').click();
+});
 $('cancelForm').addEventListener('click', closeForm);
 $('fType').addEventListener('change', updateAdvancedVisibility);
 $('thsPreset').addEventListener('click', applyThsPreset);

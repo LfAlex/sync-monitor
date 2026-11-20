@@ -53,19 +53,48 @@ const PRESET_THS = {
 /* 存储                                                                */
 /* ------------------------------------------------------------------ */
 
+function repairLegacyThsPageApi(monitor) {
+  const api = monitor.pageapi;
+  if (!api || api.url !== PRESET_THS.pageapi.url) return false;
+  let repaired = false;
+
+  const headers = api.headers && typeof api.headers === 'object' ? api.headers : {};
+  if (!Object.keys(headers).some((name) => name.toLowerCase() === 'content-type')) {
+    headers['Content-Type'] = 'application/json';
+    api.headers = headers;
+    repaired = true;
+  }
+
+  const missingBody = api.body == null || (typeof api.body === 'string' && !api.body.trim());
+  if (missingBody) {
+    try {
+      const pageUrl = api.pageUrl || monitor.url;
+      const userCode = new URL(pageUrl).searchParams.get('user_code');
+      if (userCode) {
+        api.body = { user_code: userCode };
+        repaired = true;
+      }
+    } catch {
+      // 保留已有配置，后续请求会透出真实错误
+    }
+  }
+  return repaired;
+}
+
 async function loadState() {
   const data = await chrome.storage.local.get(STORAGE_KEYS);
   memory.monitors = (data.monitors || []).map(normalizeMonitor);
   memory.results = data.results || {};
   memory.settings = { ...DEFAULT_SETTINGS, ...(data.settings || {}) };
 
-  // 旧版本预置的同花顺监控没有 imagesPath，补上图字段配置，否则重新采集也拿不到图片
+  // 旧版存量配置可能缺少图片字段、页面接口请求体或 JSON 请求头，启动时一并修复
   let migrated = false;
   for (const monitor of memory.monitors) {
     if (monitor.json && monitor.json.contentPath === 'abstract.content' && !monitor.json.imagesPath) {
       monitor.json.imagesPath = 'image.urls';
       migrated = true;
     }
+    if (repairLegacyThsPageApi(monitor)) migrated = true;
   }
   if (migrated) await saveState();
   return memory;
@@ -230,11 +259,27 @@ async function pageRequest(tabId, config) {
 }
 
 async function fetchViaPage(monitor) {
+  // 兼容扩展更新前已保存的空请求体或缺失 JSON 请求头；否则同花顺会返回 HTTP 200 + status_code=1000
+  if (repairLegacyThsPageApi(monitor)) await saveState();
   const pageUrl = monitor.pageapi.pageUrl || monitor.url;
   const tabs = await findTabs(pageUrl);
   let tab = pickBestTab(tabs, pageUrl);
+  let autoOpened = false;
   if (!tab) {
-    throw new Error('页面未打开：请先在浏览器中打开该主页，扩展才能读取其接口数据');
+    try {
+      if (chrome.windows && chrome.windows.create) {
+        // 独立最小化窗口不会在当前浏览器窗口的标签栏中显示，后续检查持续复用
+        const win = await chrome.windows.create({ url: pageUrl, focused: false, state: 'minimized' });
+        tab = win && win.tabs && win.tabs[0];
+      } else {
+        // 老版本 Chrome 没有 windows.create 时退化为后台标签页
+        tab = await chrome.tabs.create({ url: pageUrl, active: false });
+      }
+      autoOpened = true;
+    } catch (error) {
+      throw new Error(`自动打开监控主页失败：${String((error && error.message) || error)}`);
+    }
+    if (!tab || tab.id == null) throw new Error('自动打开监控主页失败：未创建标签页');
   }
 
   // Chrome 会丢弃长期未查看的标签页（status=unloaded），此时无法注入脚本，
@@ -270,14 +315,33 @@ async function fetchViaPage(monitor) {
     body: monitor.pageapi.body
   };
 
-  // 同花顺等站点的签名 Cookie 由页面 JS 异步生成，页面刚打开时请求会 401/403；
-  // 标签页被丢弃、页面尚在加载时注入也可能临时失败，因此统一退避重试。
+  // 同花顺等站点的签名 Cookie 由页面 JS 异步生成，页面刚打开时可能返回 401/403，
+  // 也可能以 HTTP 200 返回 status_code/status_msg；自动打开的页面多等待几轮。
   let lastError = '页面内接口请求失败';
   let lastStatus = 0;
-  for (let attempt = 0; attempt < 3; attempt += 1) {
+  const maxAttempts = autoOpened ? 5 : 3;
+  for (let attempt = 0; attempt < maxAttempts; attempt += 1) {
     if (attempt > 0) await new Promise((resolve) => setTimeout(resolve, 1500 * attempt));
     const response = await pageRequest(tab.id, config);
-    if (response.ok) return response.text;
+    if (response.ok) {
+      let apiError = '';
+      try {
+        const payload = JSON.parse(response.text);
+        const listPath = monitor.json && monitor.json.listPath;
+        const expectsData = listPath === 'data' || (typeof listPath === 'string' && listPath.startsWith('data.'));
+        if (expectsData && payload && typeof payload === 'object' && !Array.isArray(payload) && !payload.data) {
+          const message = payload.status_msg || '响应中缺少 data';
+          const code = payload.status_code !== undefined ? `，status_code=${payload.status_code}` : '';
+          apiError = `接口暂未就绪：${message}${code}`;
+        }
+      } catch {
+        // 非 JSON 响应交给后续解析器报错
+      }
+      if (!apiError) return response.text;
+      lastStatus = response.status || 0;
+      lastError = apiError;
+      continue;
+    }
     lastStatus = response.status || 0;
     lastError = response.error || response.message || (lastStatus ? `HTTP ${lastStatus}` : lastError);
   }
@@ -488,6 +552,16 @@ const handlers = {
     if (!monitor) throw new Error('监控项不存在');
     const result = await checkMonitor(monitor, { force: true, silent: !!message.silent });
     return { result, ...statePayload() };
+  },
+
+  async CHECK_ALL_MONITORS(message) {
+    await ensureReady();
+    const checks = [];
+    for (const monitor of memory.monitors) {
+      const result = await checkMonitor(monitor, { force: true, silent: !!message.silent });
+      checks.push({ id: monitor.id, result });
+    }
+    return { checks, ...statePayload() };
   },
 
   async TEST_MONITOR(message) {

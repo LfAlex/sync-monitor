@@ -105,6 +105,9 @@ main { padding: 12px 16px 6px; }
 }
 
 .section-head h2 { font-size: 12px; font-weight: 600; color: var(--muted); letter-spacing: .4px; }
+.section-actions { display: flex; gap: 6px; }
+.section-head .ghost { background: #fff; color: #334155; border-color: var(--line); }
+.section-head .ghost:hover { background: #f1f5f9; }
 
 .list { display: flex; flex-direction: column; gap: 10px; }
 

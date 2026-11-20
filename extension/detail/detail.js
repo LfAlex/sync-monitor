@@ -92,6 +92,22 @@ function renderList() {
 
     // 卡片与「全文与图片」进入该条动态的下钻页；点原文链接不触发跳转
     const drillUrl = `item.html?monitor=${encodeURIComponent(monitor.id)}&key=${encodeURIComponent(item.key)}`;
+    const imageGrid = node.querySelector('.images');
+    for (const [index, src] of (item.images || []).entries()) {
+      const thumbnail = document.createElement('button');
+      thumbnail.className = 'thumbnail';
+      thumbnail.type = 'button';
+      thumbnail.title = '查看全文与图片';
+      thumbnail.setAttribute('aria-label', `查看第 ${index + 1} 张配图`);
+      const img = document.createElement('img');
+      img.src = src;
+      img.referrerPolicy = 'no-referrer';
+      img.loading = 'lazy';
+      img.alt = `动态配图 ${index + 1}`;
+      thumbnail.appendChild(img);
+      imageGrid.appendChild(thumbnail);
+    }
+
     const drill = document.createElement('a');
     drill.className = 'origin drill';
     drill.href = drillUrl;

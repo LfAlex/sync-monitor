@@ -53,7 +53,10 @@
   <main>
     <div class="section-head">
       <h2>监控项</h2>
-      <button id="showForm" class="primary small" type="button">添加监控</button>
+      <div class="section-actions">
+        <button id="checkAll" class="ghost small" type="button" title="检查所有监控项">立即检查</button>
+        <button id="showForm" class="primary small" type="button">添加监控</button>
+      </div>
     </div>
     <div id="list" class="list"></div>
     <div id="emptyTip" class="empty hidden">
@@ -61,6 +64,20 @@
       <p class="muted">可以添加 RSS 地址、普通列表页，或像同花顺主页这样的单页应用接口。</p>
     </div>
   </main>
+
+  <section id="quickAddPanel" class="panel hidden">
+    <h3>添加同花顺监控</h3>
+    <label class="field">
+      <span>用户 ID</span>
+      <input type="text" id="quickUserId" placeholder="例如：1179giyc4jr06d6785e69e" spellcheck="false" />
+    </label>
+    <p class="hint">接口、请求头、解析规则和检查间隔自动套用当前配置，只需替换用户 ID。</p>
+    <div class="form-actions">
+      <button id="saveQuickMonitor" class="primary" type="button">保存并检查</button>
+      <button id="advancedAdd" class="ghost" type="button">高级配置</button>
+      <button id="cancelQuickAdd" class="ghost" type="button">取消</button>
+    </div>
+  </section>
 
   <section id="formPanel" class="panel hidden">
     <h3 id="formTitle">添加监控项</h3>

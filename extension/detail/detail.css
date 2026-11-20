@@ -146,6 +146,7 @@ h1 { font-size: 21px; margin: 0; font-weight: 650; }
   gap: 10px;
   margin: 12px 0;
 }
+.images:empty { display: none; }
 
 .thumbnail {
   width: 104px;
