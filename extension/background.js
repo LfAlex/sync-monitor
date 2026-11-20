@@ -455,19 +455,20 @@ function serverChanJobKey(monitorId, itemKey) {
 
 function enqueueServerChan(monitor, items) {
   const config = normalizedServerChan(memory.settings.serverChan);
-  if (!config.enabled) return;
+  const current = memory.monitors.find((item) => item.id === monitor.id) || monitor;
+  if (!config.enabled || !current.serverChanEnabled) return;
   for (const item of items) {
     const discoveredAt = item.discoveredAt || Date.now();
     const excerpt = String(item.content || item.title || '（无正文）').slice(0, 200);
-    memory.serverChanQueue.jobs[serverChanJobKey(monitor.id, item.key)] = {
-      monitorId: monitor.id,
+    memory.serverChanQueue.jobs[serverChanJobKey(current.id, item.key)] = {
+      monitorId: current.id,
       itemKey: item.key,
-      monitorName: monitor.name || monitor.url,
+      monitorName: current.name || current.url,
       title: String(item.title || excerpt).slice(0, 120),
       excerpt,
-      link: item.link || monitor.url,
+      link: item.link || current.url,
       discoveredAt,
-      dueAt: discoveredAt + config.delayMin * 60 * 1000
+      dueAt: discoveredAt + current.serverChanDelayMin * 60 * 1000
     };
   }
 }
@@ -478,9 +479,19 @@ function cancelServerChanJobs(predicate) {
   }
 }
 
-function rescheduleServerChanJobs(delayMin) {
+function rescheduleServerChanJobs(delayMin, monitorId) {
   for (const job of Object.values(memory.serverChanQueue.jobs)) {
-    job.dueAt = job.discoveredAt + delayMin * 60 * 1000;
+    if (job.monitorId === monitorId) {
+      job.dueAt = job.discoveredAt + delayMin * 60 * 1000;
+    }
+  }
+}
+
+function reconcileServerChanMonitor(previous, monitor, sourceChanged) {
+  if (sourceChanged || !monitor.serverChanEnabled) {
+    cancelServerChanJobs((job) => job.monitorId === monitor.id);
+  } else if (previous.serverChanDelayMin !== monitor.serverChanDelayMin) {
+    rescheduleServerChanJobs(monitor.serverChanDelayMin, monitor.id);
   }
 }
 
@@ -525,8 +536,7 @@ async function postServerChan(rawConfig, title, desp) {
 }
 
 function serverChanMessage(jobs) {
-  const delayMin = normalizedServerChan(memory.settings.serverChan).delayMin;
-  const title = `Sync Monitor：${jobs.length} 条未读动态（${delayMin} 分钟）`;
+  const title = `Sync Monitor：${jobs.length} 条未读动态`;
   const desp = jobs.map((job, index) => {
     const heading = `### ${index + 1}. ${job.monitorName}`;
     const itemTitle = job.title || job.excerpt || '未命名动态';
@@ -541,7 +551,23 @@ async function flushServerChan() {
   if (serverChanFlushing) return;
   const config = normalizedServerChan(memory.settings.serverChan);
   const queue = memory.serverChanQueue;
-  if (!config.enabled || Date.now() < queue.nextAttemptAt) return;
+  if (!config.enabled) return;
+  let cancelled = false;
+  for (const [key, job] of Object.entries(queue.jobs)) {
+    const monitor = memory.monitors.find((item) => item.id === job.monitorId);
+    if (!monitor || !monitor.serverChanEnabled) {
+      delete queue.jobs[key];
+      cancelled = true;
+    }
+  }
+  if (cancelled) {
+    if (!Object.keys(queue.jobs).length) {
+      queue.nextAttemptAt = 0;
+      queue.lastError = '';
+    }
+    await saveState();
+  }
+  if (Date.now() < queue.nextAttemptAt) return;
   const due = Object.entries(queue.jobs)
     .filter(([, job]) => job.dueAt <= Date.now())
     .sort((left, right) => left[1].dueAt - right[1].dueAt);
@@ -743,6 +769,7 @@ const handlers = {
     const monitor = normalizeMonitor({ ...previous, ...message.monitor });
     const changed = previous.url !== monitor.url || previous.type !== monitor.type;
     memory.monitors[index] = monitor;
+    reconcileServerChanMonitor(previous, monitor, changed);
     if (changed) delete memory.results[monitor.id];
     await saveState();
     const result = await checkMonitor(monitor, { silent: true, force: true });
@@ -798,8 +825,15 @@ const handlers = {
     const incoming = (message.monitors || []).map(normalizeMonitor).filter((item) => item.url);
     for (const monitor of incoming) {
       const index = memory.monitors.findIndex((item) => item.id === monitor.id || item.url === monitor.url);
-      if (index >= 0) memory.monitors[index] = { ...monitor, id: memory.monitors[index].id };
-      else memory.monitors.push(monitor);
+      if (index >= 0) {
+        const previous = memory.monitors[index];
+        const next = { ...monitor, id: previous.id };
+        const changed = previous.url !== next.url || previous.type !== next.type;
+        memory.monitors[index] = next;
+        reconcileServerChanMonitor(previous, next, changed);
+      } else {
+        memory.monitors.push(monitor);
+      }
     }
     await saveState();
     return statePayload();
@@ -874,8 +908,6 @@ const handlers = {
       memory.serverChanQueue.jobs = {};
       memory.serverChanQueue.nextAttemptAt = 0;
       memory.serverChanQueue.lastError = '';
-    } else if (serverChan.delayMin !== previousServerChan.delayMin) {
-      rescheduleServerChanJobs(serverChan.delayMin);
     }
     await saveState();
     return statePayload();

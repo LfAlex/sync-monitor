@@ -370,6 +370,8 @@ export function normalizeMonitor(raw = {}) {
     enabled: raw.enabled !== false,
     intervalSec: interval,
     aiSummaryEnabled: raw.aiSummaryEnabled === true,
+    serverChanEnabled: raw.serverChanEnabled === true,
+    serverChanDelayMin: clamp(raw.serverChanDelayMin || 60, 1, 10080),
     // 仅扩展使用：render=tab 时读取已打开标签页渲染后的 DOM（适合 Vue/React 单页应用）
     render: raw.render === 'tab' ? 'tab' : 'fetch',
     headers: raw.headers && typeof raw.headers === 'object' ? { ...raw.headers } : {},

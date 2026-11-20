@@ -94,7 +94,17 @@
           <input type="checkbox" id="fAiSummaryEnabled" />
           <span>发现新动态时生成 AI 概览（需同时开启全局 AI）</span>
         </label>
+        <label class="switch-line">
+          <input type="checkbox" id="fServerChanEnabled" />
+          <span>允许 Server 酱未读通知（需同时开启全局 Server 酱）</span>
+        </label>
       </div>
+
+      <label class="field">
+        <span>Server 酱未读多少分钟后通知</span>
+        <input type="number" id="fServerChanDelayMin" min="1" max="10080" step="1" value="60" />
+        <small>仅对当前监控生效；默认不允许通知。</small>
+      </label>
 
       <label class="field">
         <span>备注（可空）</span>

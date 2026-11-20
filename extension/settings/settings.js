@@ -319,6 +319,10 @@ function openForm(monitor = null) {
   $('fInterval').value = monitor ? monitor.intervalSec : (state.settings.defaultIntervalSec || 300);
   $('fEnabled').checked = monitor ? monitor.enabled !== false : true;
   $('fAiSummaryEnabled').checked = monitor ? monitor.aiSummaryEnabled === true : false;
+  $('fServerChanEnabled').checked = monitor ? monitor.serverChanEnabled === true : false;
+  $('fServerChanDelayMin').value = monitor
+    ? (monitor.serverChanDelayMin || 60)
+    : ((state.settings.serverChan || {}).delayMin || 60);
   $('fNote').value = monitor ? monitor.note || '' : '';
   $('fThsUserId').value = ths ? extractThsUserId(monitor) : '';
 
@@ -393,6 +397,8 @@ function collectForm() {
     intervalSec: Number($('fInterval').value) || 300,
     note: $('fNote').value.trim(),
     aiSummaryEnabled: $('fAiSummaryEnabled').checked,
+    serverChanEnabled: $('fServerChanEnabled').checked,
+    serverChanDelayMin: clampNumber($('fServerChanDelayMin').value, 60, 1, 10080),
     headers,
     html: {
       itemSelector: $('fItemSelector').value.trim(),
@@ -477,6 +483,8 @@ function buildQuickThsMonitor(code) {
       name: `同花顺 · ${code}`,
       url: pageUrl,
       enabled: true,
+      serverChanEnabled: false,
+      serverChanDelayMin: (state.settings.serverChan || {}).delayMin || 60,
       headers: { ...(headers || {}) },
       json: { ...(json || {}) },
       pageapi: {
@@ -494,6 +502,8 @@ function buildQuickThsMonitor(code) {
     enabled: true,
     intervalSec: state.settings.defaultIntervalSec || 300,
     aiSummaryEnabled: false,
+    serverChanEnabled: false,
+    serverChanDelayMin: (state.settings.serverChan || {}).delayMin || 60,
     pageapi: {
       pageUrl,
       url: THS_API_PATH,
@@ -737,6 +747,8 @@ $('exportMonitors').addEventListener('click', () => {
     enabled: monitor.enabled,
     intervalSec: monitor.intervalSec,
     aiSummaryEnabled: monitor.aiSummaryEnabled,
+    serverChanEnabled: monitor.serverChanEnabled,
+    serverChanDelayMin: monitor.serverChanDelayMin,
     headers: monitor.headers,
     browser: monitor.browser,
     html: monitor.html,
