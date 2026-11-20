@@ -126,6 +126,33 @@ h1 { font-size: 21px; margin: 0; font-weight: 650; }
 }
 .item.is-new .badge-new { display: inline-block; }
 
+.ai-summary {
+  margin: 14px 0 18px;
+  padding: 14px 16px;
+  border: 1px solid #e5dcff;
+  border-radius: 10px;
+  background: linear-gradient(135deg, #faf8ff, #f5f3ff);
+}
+
+.ai-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.ai-head h2 { margin: 0; color: #6d28d9; font-size: 14px; font-weight: 650; }
+.ai-actions { display: flex; align-items: center; gap: 8px; }
+.ai-button, .ai-settings {
+  border: 1px solid #d8ccfa;
+  border-radius: 7px;
+  background: #fff;
+  color: #6d28d9;
+  padding: 4px 9px;
+  font-size: 12px;
+  cursor: pointer;
+}
+.ai-button:hover, .ai-settings:hover { background: #f0eaff; }
+.ai-button:disabled { opacity: .55; cursor: default; }
+.ai-settings { border-color: transparent; background: transparent; color: #7c6a9c; }
+.ai-text { margin: 9px 0 0; color: #3f3654; white-space: pre-wrap; word-break: break-word; font-size: 14px; }
+.ai-meta { margin: 7px 0 0; color: #8a7ca3; font-size: 11px; }
+.ai-meta:empty { display: none; }
+
 .content {
   margin: 8px 0 10px;
   white-space: pre-wrap;

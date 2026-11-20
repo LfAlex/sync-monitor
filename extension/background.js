@@ -8,6 +8,7 @@
  */
 
 import { collectItems, normalizeMonitor, DEFAULT_SETTINGS } from './lib/parse.js';
+import { generateChineseSummary, testAiConnection } from './lib/ai.js';
 
 const ALARM_NAME = 'sync-monitor-tick';
 const STORAGE_KEYS = ['monitors', 'results', 'settings'];
@@ -85,7 +86,12 @@ async function loadState() {
   const data = await chrome.storage.local.get(STORAGE_KEYS);
   memory.monitors = (data.monitors || []).map(normalizeMonitor);
   memory.results = data.results || {};
-  memory.settings = { ...DEFAULT_SETTINGS, ...(data.settings || {}) };
+  const storedSettings = data.settings || {};
+  memory.settings = {
+    ...DEFAULT_SETTINGS,
+    ...storedSettings,
+    ai: { ...DEFAULT_SETTINGS.ai, ...(storedSettings.ai || {}) }
+  };
 
   // 旧版存量配置可能缺少图片字段、页面接口请求体或 JSON 请求头，启动时一并修复
   let migrated = false;
@@ -419,6 +425,61 @@ chrome.notifications.onClicked.addListener(async (notificationId) => {
 });
 
 /* ------------------------------------------------------------------ */
+/* AI 概览                                                             */
+/* ------------------------------------------------------------------ */
+
+function mergeItemCache(items, previous) {
+  const cached = new Map();
+  for (const item of [...(previous.items || []), ...(previous.recentNew || [])]) {
+    if (!cached.has(item.key)) cached.set(item.key, item);
+  }
+  return items.map((item) => {
+    const old = cached.get(item.key);
+    if (!old) return item;
+    return {
+      ...item,
+      ...(old.aiSummary ? { aiSummary: old.aiSummary } : {}),
+      ...(old.discoveredAt ? { discoveredAt: old.discoveredAt } : {})
+    };
+  });
+}
+
+async function writeAiSummary(item) {
+  const config = memory.settings.ai || {};
+  try {
+    const text = await generateChineseSummary(config, item);
+    item.aiSummary = {
+      status: 'ready',
+      text,
+      error: '',
+      model: config.model,
+      updatedAt: Date.now()
+    };
+  } catch (error) {
+    item.aiSummary = {
+      status: 'error',
+      text: '',
+      error: String((error && error.message) || error),
+      model: config.model || '',
+      updatedAt: Date.now()
+    };
+  }
+  return item.aiSummary;
+}
+
+async function generateFreshSummaries(items) {
+  for (const item of items) await writeAiSummary(item);
+}
+
+function updateCachedSummary(result, key, aiSummary) {
+  for (const field of ['items', 'recentNew']) {
+    for (const item of result[field] || []) {
+      if (item.key === key) item.aiSummary = aiSummary;
+    }
+  }
+}
+
+/* ------------------------------------------------------------------ */
 /* 检查                                                                */
 /* ------------------------------------------------------------------ */
 
@@ -437,10 +498,13 @@ async function checkMonitor(monitor, options = {}) {
     }
 
     const collected = await collectItems(monitor, extra);
+    const collectedItems = mergeItemCache(collected.items, previous);
     const initialized = previous.initialized === true;
     const seen = new Set(previous.seen || []);
-    const fresh = collected.items.filter((item) => !seen.has(item.key));
-    collected.items.forEach((item) => seen.add(item.key));
+    const fresh = collectedItems.filter((item) => !seen.has(item.key));
+    const discoveredAt = Date.now();
+    fresh.forEach((item) => { item.discoveredAt = discoveredAt; });
+    collectedItems.forEach((item) => seen.add(item.key));
 
     const next = {
       ...previous,
@@ -449,10 +513,10 @@ async function checkMonitor(monitor, options = {}) {
       source: collected.source,
       warnings: collected.warnings || [],
       seen: [...seen].slice(-300),
-      items: collected.items.slice(0, 30),
+      items: collectedItems.slice(0, 30),
       lastCheckAt: Date.now(),
       lastError: '',
-      lastCount: collected.items.length
+      lastCount: collectedItems.length
     };
 
     const isNew = fresh.length > 0 && initialized && !options.silent;
@@ -466,7 +530,11 @@ async function checkMonitor(monitor, options = {}) {
     updateBadge();
 
     if (isNew) await notifyMonitor(monitor, fresh);
-    return { ok: true, baseline: !initialized, new: isNew ? fresh.length : 0, total: collected.items.length, items: collected.items };
+    if (isNew && monitor.aiSummaryEnabled && memory.settings.ai && memory.settings.ai.enabled) {
+      await generateFreshSummaries(fresh);
+      await saveState();
+    }
+    return { ok: true, baseline: !initialized, new: isNew ? fresh.length : 0, total: collectedItems.length, items: next.items };
   } catch (error) {
     memory.results[monitor.id] = {
       ...previous,
@@ -592,12 +660,52 @@ const handlers = {
     return statePayload();
   },
 
+  async GENERATE_ITEM_SUMMARY(message) {
+    await ensureReady();
+    if (!memory.settings.ai || !memory.settings.ai.enabled) {
+      throw new Error('请先在设置页开启 AI 概览');
+    }
+    const result = memory.results[message.id];
+    if (!result) throw new Error('监控结果不存在');
+    const item = [...(result.items || []), ...(result.recentNew || [])]
+      .find((entry) => entry.key === message.key);
+    if (!item) throw new Error('动态条目不存在');
+
+    if ((!item.aiSummary || item.aiSummary.status !== 'ready') || message.force) {
+      const aiSummary = await writeAiSummary(item);
+      updateCachedSummary(result, item.key, aiSummary);
+      await saveState();
+    }
+    return {
+      ok: item.aiSummary.status === 'ready',
+      message: item.aiSummary.error || '',
+      item,
+      ...statePayload()
+    };
+  },
+
+  async TEST_AI_CONNECTION(message) {
+    await ensureReady();
+    const config = message.ai || message.config
+      || (message.settings && message.settings.ai) || memory.settings.ai;
+    const summary = await testAiConnection(config);
+    return { ok: true, message: '模型连接成功', summary };
+  },
+
+  async OPEN_SETTINGS() {
+    await chrome.tabs.create({ url: chrome.runtime.getURL('settings/settings.html') });
+    return { ok: true };
+  },
+
   async SAVE_SETTINGS(message) {
     await ensureReady();
+    const incoming = message.settings || {};
     memory.settings = {
       ...memory.settings,
-      ...message.settings,
-      toastDurationSec: Math.max(5, Math.min(120, Number(message.settings.toastDurationSec) || 25))
+      ...incoming,
+      ai: { ...memory.settings.ai, ...(incoming.ai || {}) },
+      toastDurationSec: Math.max(5, Math.min(120,
+        Number(incoming.toastDurationSec ?? memory.settings.toastDurationSec) || 25))
     };
     await saveState();
     return statePayload();

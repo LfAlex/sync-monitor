@@ -19,6 +19,17 @@
   <main class="list">
     <article id="card" class="item item-full" hidden>
       <div class="item-head"><span id="time" class="time"></span></div>
+      <section id="aiPanel" class="ai-summary">
+        <div class="ai-head">
+          <h2>AI 概览</h2>
+          <div class="ai-actions">
+            <button id="aiAction" class="ai-button" type="button">生成 AI 概览</button>
+            <button id="aiSettings" class="ai-settings" type="button">AI 设置</button>
+          </div>
+        </div>
+        <p id="aiText" class="ai-text">根据原文生成一段简明中文概览。</p>
+        <p id="aiMeta" class="ai-meta"></p>
+      </section>
       <p id="content" class="content"></p>
       <div id="images" class="images"></div>
       <div class="item-foot">

@@ -1,9 +1,10 @@
-<!DOCTYPE html>
+<!doctype html>
 <html lang="zh-CN">
 <head>
-  <meta charset="utf-8" />
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Sync Monitor</title>
-  <link rel="stylesheet" href="popup.css" />
+  <link rel="stylesheet" href="popup.css">
 </head>
 <body>
   <header class="topbar">
@@ -11,242 +12,48 @@
       <span class="pulse"></span>
       <div>
         <h1>Sync Monitor</h1>
-        <p id="subtitle">主页动态监控</p>
+        <p id="subtitle">最近新动态</p>
       </div>
     </div>
-    <div class="top-actions">
-      <button id="markRead" class="ghost" type="button" title="全部标记已读">已读</button>
-      <button id="toggleSettings" class="ghost" type="button" title="设置">设置</button>
-    </div>
+    <button id="openSettings" class="ghost" type="button">设置</button>
   </header>
-
-  <section id="settingsPanel" class="panel hidden">
-    <div class="row">
-      <label class="switch-line">
-        <input type="checkbox" id="sPageToast" />
-        <span>在页面上弹出提示</span>
-      </label>
-      <label class="switch-line">
-        <input type="checkbox" id="sSystemNotification" />
-        <span>页面未打开时发系统通知</span>
-      </label>
-    </div>
-    <div class="row two">
-      <label class="field">
-        <span>提示停留（秒）</span>
-        <input type="number" id="sToastDuration" min="5" max="120" step="1" />
-      </label>
-      <label class="field">
-        <span>默认间隔（秒）</span>
-        <input type="number" id="sInterval" min="60" max="86400" step="60" />
-      </label>
-    </div>
-    <div class="row">
-      <button id="saveSettings" class="primary small" type="button">保存设置</button>
-      <button id="exportMonitors" class="ghost small" type="button">导出监控项</button>
-      <button id="importMonitors" class="ghost small" type="button">导入</button>
-      <input type="file" id="importFile" accept=".json,application/json" hidden />
-    </div>
-    <p class="hint">提示/通知只在“发现新动态”时触发；首次添加监控项仅建立基线，不提示历史内容。</p>
-  </section>
 
   <main>
     <div class="section-head">
-      <h2>监控项</h2>
+      <div>
+        <div class="section-title">
+          <h2>最近新动态</h2>
+          <span id="checkStatus" class="check-status">尚未检查</span>
+        </div>
+        <p id="unreadSummary" class="summary"></p>
+      </div>
       <div class="section-actions">
-        <button id="checkAll" class="ghost small" type="button" title="检查所有监控项">立即检查</button>
-        <button id="showForm" class="primary small" type="button">添加监控</button>
+        <button id="checkAll" class="ghost small" type="button">全部检查</button>
+        <button id="markRead" class="ghost small" type="button">全部已读</button>
       </div>
     </div>
+
+    <div id="feedback" class="feedback hidden" role="alert"></div>
     <div id="list" class="list"></div>
     <div id="emptyTip" class="empty hidden">
-      <p>还没有监控项。</p>
-      <p class="muted">可以添加 RSS 地址、普通列表页，或像同花顺主页这样的单页应用接口。</p>
+      <strong id="emptyTitle">暂无新动态</strong>
+      <p id="emptyText">发现新内容后，会在这里显示最近几条。</p>
+      <button id="emptyAction" class="primary small" type="button">管理监控</button>
     </div>
   </main>
 
-  <section id="quickAddPanel" class="panel hidden">
-    <h3>添加同花顺监控</h3>
-    <label class="field">
-      <span>用户 ID</span>
-      <input type="text" id="quickUserId" placeholder="例如：1179giyc4jr06d6785e69e" spellcheck="false" />
-    </label>
-    <p class="hint">接口、请求头、解析规则和检查间隔自动套用当前配置，只需替换用户 ID。</p>
-    <div class="form-actions">
-      <button id="saveQuickMonitor" class="primary" type="button">保存并检查</button>
-      <button id="advancedAdd" class="ghost" type="button">高级配置</button>
-      <button id="cancelQuickAdd" class="ghost" type="button">取消</button>
-    </div>
-  </section>
-
-  <section id="formPanel" class="panel hidden">
-    <h3 id="formTitle">添加监控项</h3>
-    <input type="hidden" id="fId" />
-
-    <label class="field">
-      <span>名称</span>
-      <input type="text" id="fName" placeholder="例如：同花顺 · 某用户主页" />
-    </label>
-
-    <label class="field">
-      <span>主页地址</span>
-      <input type="text" id="fUrl" placeholder="https://..." spellcheck="false" />
-    </label>
-
-    <div class="row two">
-      <label class="field">
-        <span>类型</span>
-        <select id="fType">
-          <option value="auto">自动识别</option>
-          <option value="rss">RSS / Atom</option>
-          <option value="html">HTML 列表页</option>
-          <option value="json">JSON 接口</option>
-          <option value="pageapi">页面内接口（单页应用）</option>
-        </select>
-      </label>
-      <label class="field">
-        <span>检查间隔（秒）</span>
-        <input type="number" id="fInterval" min="60" max="86400" step="60" value="300" />
-      </label>
-    </div>
-
-    <label class="switch-line">
-      <input type="checkbox" id="fEnabled" checked />
-      <span>启用</span>
-    </label>
-
-    <label class="field">
-      <span>备注（可空）</span>
-      <input type="text" id="fNote" placeholder="例如：同花顺主页，需要保持页面打开" />
-    </label>
-
-    <div id="advPageapi" class="advanced hidden">
-      <p class="hint">在已打开的主页里，用页面自身的登录态/签名请求接口。同花顺、微博等单页应用选这个。</p>
-      <label class="field">
-        <span>接口地址（相对或绝对）</span>
-        <input type="text" id="fApiUrl" placeholder="/user_center/open/api/content/v2/get_by_uid" spellcheck="false" />
-      </label>
-      <div class="row two">
-        <label class="field">
-          <span>请求方法</span>
-          <select id="fApiMethod">
-            <option value="POST">POST</option>
-            <option value="GET">GET</option>
-          </select>
-        </label>
-        <label class="field">
-          <span>接口所在页面</span>
-          <input type="text" id="fPageUrl" placeholder="留空则与主页地址相同" spellcheck="false" />
-        </label>
-      </div>
-      <label class="field">
-        <span>请求体 / 查询（JSON，GET 时可留空）</span>
-        <textarea id="fApiBody" rows="3" spellcheck="false" placeholder='{"user_code":"..."}'></textarea>
-      </label>
-      <button id="thsPreset" class="ghost small" type="button">从主页地址填充同花顺预设</button>
-    </div>
-
-    <div id="advHtml" class="advanced hidden">
-      <label class="switch-line">
-        <input type="checkbox" id="fRenderTab" />
-        <span>读取已打开页面的渲染结果（单页应用可用）</span>
-      </label>
-      <label class="field">
-        <span>列表项选择器</span>
-        <input type="text" id="fItemSelector" placeholder="li.feed-item" spellcheck="false" />
-      </label>
-      <div class="row two">
-        <label class="field">
-          <span>标题选择器</span>
-          <input type="text" id="fTitleSelector" placeholder=".title" spellcheck="false" />
-        </label>
-        <label class="field">
-          <span>链接选择器</span>
-          <input type="text" id="fLinkSelector" placeholder="a[href]" spellcheck="false" />
-        </label>
-      </div>
-      <div class="row two">
-        <label class="field">
-          <span>时间选择器</span>
-          <input type="text" id="fTimeSelector" placeholder=".time" spellcheck="false" />
-        </label>
-        <label class="field">
-          <span>内容选择器</span>
-          <input type="text" id="fContentSelector" placeholder=".summary" spellcheck="false" />
-        </label>
-      </div>
-    </div>
-
-    <div id="advJson" class="advanced hidden">
-      <p class="hint">按点号路径取值，支持数组下标（如 data.contents）。时间戳可在“时间格式”填 ms / s。</p>
-      <div class="row two">
-        <label class="field">
-          <span>列表路径</span>
-          <input type="text" id="fListPath" placeholder="data.contents" spellcheck="false" />
-        </label>
-        <label class="field">
-          <span>唯一 ID 路径</span>
-          <input type="text" id="fIdPath" placeholder="info.id" spellcheck="false" />
-        </label>
-      </div>
-      <div class="row two">
-        <label class="field">
-          <span>正文路径</span>
-          <input type="text" id="fContentPath" placeholder="abstract.content" spellcheck="false" />
-        </label>
-        <label class="field">
-          <span>标题路径（可空）</span>
-          <input type="text" id="fTitlePath" placeholder="留空则由正文生成" spellcheck="false" />
-        </label>
-      </div>
-      <div class="row two">
-        <label class="field">
-          <span>时间路径</span>
-          <input type="text" id="fTimePath" placeholder="info.ctime" spellcheck="false" />
-        </label>
-        <label class="field">
-          <span>时间格式</span>
-          <select id="fTimeFormat">
-            <option value="">自动</option>
-            <option value="ms">毫秒时间戳</option>
-            <option value="s">秒时间戳</option>
-          </select>
-        </label>
-      </div>
-      <div class="row two">
-        <label class="field">
-          <span>链接路径</span>
-          <input type="text" id="fLinkPath" placeholder="info.jump_url" spellcheck="false" />
-        </label>
-        <label class="field">
-          <span>链接模板（可空）</span>
-          <input type="text" id="fLinkTemplate" placeholder="https://.../{id}" spellcheck="false" />
-        </label>
-      </div>
-      <div class="row two">
-        <label class="field">
-          <span>图片路径（可空）</span>
-          <input type="text" id="fImagesPath" placeholder="image.urls" spellcheck="false" />
-        </label>
-      </div>
-    </div>
-
-    <label class="field">
-      <span>附加请求头（JSON，可空）</span>
-      <textarea id="fHeaders" rows="2" spellcheck="false" placeholder='{"Referer":"https://..."}'></textarea>
-    </label>
-
-    <div class="form-actions">
-      <button id="saveMonitor" class="primary" type="button">保存并检查</button>
-      <button id="testMonitor" class="ghost" type="button">测试解析</button>
-      <button id="cancelForm" class="ghost" type="button">取消</button>
-    </div>
-    <pre id="testResult" class="test-result hidden"></pre>
-  </section>
-
   <footer class="footer">
-    <span id="footerTip">后台每分钟检查一次到期项目；同花顺建议保持页面打开。</span>
+    <button id="openAll" class="link-button" type="button">查看全部动态 →</button>
   </footer>
+
+  <template id="itemTemplate">
+    <article class="news-card" tabindex="0" role="button">
+      <div class="news-meta"><span class="source"></span><span class="time"></span></div>
+      <h3 class="news-title"></h3>
+      <p class="news-content"></p>
+      <div class="news-foot"><span class="ai-badge hidden">AI 概览</span><span class="read-more">阅读全文 →</span></div>
+    </article>
+  </template>
 
   <script type="module" src="popup.js"></script>
 </body>

@@ -1,0 +1,320 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Sync Monitor · 设置</title>
+  <link rel="stylesheet" href="settings.css" />
+</head>
+<body>
+  <header class="topbar">
+    <div class="topbar-inner">
+      <div class="brand">
+        <span class="pulse"></span>
+        <div>
+          <h1>Sync Monitor</h1>
+          <p id="subtitle">正在加载监控配置…</p>
+        </div>
+      </div>
+      <span class="page-label">设置中心</span>
+    </div>
+  </header>
+
+  <main class="page-shell">
+    <section class="panel monitor-panel" aria-labelledby="monitorHeading">
+      <div class="section-head">
+        <div>
+          <p class="eyebrow">MONITORS</p>
+          <h2 id="monitorHeading">监控管理</h2>
+          <p class="section-description">管理信息源、检查更新，或进入详情查看已采集内容。</p>
+        </div>
+        <div class="section-actions">
+          <button id="checkAll" class="ghost small" type="button">全部检查</button>
+          <button id="showForm" class="primary small" type="button">添加监控</button>
+        </div>
+      </div>
+      <div id="list" class="list"></div>
+      <div id="emptyTip" class="empty hidden">
+        <p>还没有监控项。</p>
+        <p class="muted">点击“添加监控”，可添加 RSS、普通列表页、JSON 接口或同花顺主页。</p>
+      </div>
+    </section>
+
+    <section id="formPanel" class="panel form-panel hidden" aria-labelledby="formTitle">
+      <div class="section-head compact">
+        <div>
+          <p class="eyebrow">CONFIGURATION</p>
+          <h2 id="formTitle">添加监控项</h2>
+        </div>
+        <button id="closeForm" class="ghost small" type="button" title="关闭表单">关闭</button>
+      </div>
+      <input type="hidden" id="fId" />
+
+      <div class="row two">
+        <label class="field">
+          <span>名称</span>
+          <input type="text" id="fName" placeholder="例如：同花顺 · 某用户主页" />
+        </label>
+        <label class="field">
+          <span>主页地址</span>
+          <input type="url" id="fUrl" placeholder="https://..." spellcheck="false" />
+        </label>
+      </div>
+
+      <div class="row two">
+        <label class="field">
+          <span>类型</span>
+          <select id="fType">
+            <option value="auto">自动识别</option>
+            <option value="ths">同花顺主页</option>
+            <option value="rss">RSS / Atom</option>
+            <option value="html">HTML 列表页</option>
+            <option value="json">JSON 接口</option>
+            <option value="pageapi">页面内接口（单页应用）</option>
+          </select>
+        </label>
+        <label class="field">
+          <span>检查间隔（秒）</span>
+          <input type="number" id="fInterval" min="60" max="86400" step="60" value="300" />
+        </label>
+      </div>
+
+      <label id="thsUserField" class="field ths-user-field hidden">
+        <span>同花顺用户 ID</span>
+        <input type="text" id="fThsUserId" placeholder="例如：1179giyc4jr06d6785e69e" spellcheck="false" autocomplete="off" />
+        <small>只需填写用户 ID；请求与解析规则已预设，可在下方高级配置中调整。</small>
+      </label>
+
+      <div class="switch-group">
+        <label class="switch-line">
+          <input type="checkbox" id="fEnabled" checked />
+          <span>启用此监控</span>
+        </label>
+        <label class="switch-line">
+          <input type="checkbox" id="fAiSummaryEnabled" />
+          <span>发现新动态时生成 AI 概览（需同时开启全局 AI）</span>
+        </label>
+      </div>
+
+      <label class="field">
+        <span>备注（可空）</span>
+        <input type="text" id="fNote" placeholder="例如：同花顺主页，需要保持页面打开" />
+      </label>
+
+      <details id="advancedFields" class="advanced-details hidden">
+        <summary>高级配置</summary>
+
+      <div id="advPageapi" class="advanced hidden">
+        <h3>页面内接口</h3>
+        <p class="hint">在已打开的主页里，用页面自身的登录态或签名请求接口。同花顺保存后也使用此标准配置。</p>
+        <label class="field">
+          <span>接口地址（相对或绝对）</span>
+          <input type="text" id="fApiUrl" placeholder="/user_center/open/api/content/v2/get_by_uid" spellcheck="false" />
+        </label>
+        <div class="row two">
+          <label class="field">
+            <span>请求方法</span>
+            <select id="fApiMethod">
+              <option value="POST">POST</option>
+              <option value="GET">GET</option>
+            </select>
+          </label>
+          <label class="field">
+            <span>接口所在页面</span>
+            <input type="text" id="fPageUrl" placeholder="留空则与主页地址相同" spellcheck="false" />
+          </label>
+        </div>
+        <label class="field">
+          <span>请求体 / 查询（JSON，GET 时可留空）</span>
+          <textarea id="fApiBody" rows="3" spellcheck="false" placeholder='{"user_code":"..."}'></textarea>
+        </label>
+        <button id="thsPreset" class="ghost small" type="button">应用同花顺预设</button>
+      </div>
+
+      <div id="advHtml" class="advanced hidden">
+        <h3>HTML 解析</h3>
+        <label class="switch-line">
+          <input type="checkbox" id="fRenderTab" />
+          <span>读取已打开页面的渲染结果（单页应用可用）</span>
+        </label>
+        <label class="field">
+          <span>列表项选择器</span>
+          <input type="text" id="fItemSelector" placeholder="li.feed-item" spellcheck="false" />
+        </label>
+        <div class="row two">
+          <label class="field">
+            <span>标题选择器</span>
+            <input type="text" id="fTitleSelector" placeholder=".title" spellcheck="false" />
+          </label>
+          <label class="field">
+            <span>链接选择器</span>
+            <input type="text" id="fLinkSelector" placeholder="a[href]" spellcheck="false" />
+          </label>
+        </div>
+        <div class="row two">
+          <label class="field">
+            <span>时间选择器</span>
+            <input type="text" id="fTimeSelector" placeholder=".time" spellcheck="false" />
+          </label>
+          <label class="field">
+            <span>内容选择器</span>
+            <input type="text" id="fContentSelector" placeholder=".summary" spellcheck="false" />
+          </label>
+        </div>
+      </div>
+
+      <div id="advJson" class="advanced hidden">
+        <h3>JSON 解析</h3>
+        <p class="hint">按点号路径取值，支持数组下标（如 data.contents）。时间戳可在“时间格式”填 ms / s。</p>
+        <div class="row two">
+          <label class="field">
+            <span>列表路径</span>
+            <input type="text" id="fListPath" placeholder="data.contents" spellcheck="false" />
+          </label>
+          <label class="field">
+            <span>唯一 ID 路径</span>
+            <input type="text" id="fIdPath" placeholder="info.id" spellcheck="false" />
+          </label>
+        </div>
+        <div class="row two">
+          <label class="field">
+            <span>正文路径</span>
+            <input type="text" id="fContentPath" placeholder="abstract.content" spellcheck="false" />
+          </label>
+          <label class="field">
+            <span>标题路径（可空）</span>
+            <input type="text" id="fTitlePath" placeholder="留空则由正文生成" spellcheck="false" />
+          </label>
+        </div>
+        <div class="row two">
+          <label class="field">
+            <span>时间路径</span>
+            <input type="text" id="fTimePath" placeholder="info.ctime" spellcheck="false" />
+          </label>
+          <label class="field">
+            <span>时间格式</span>
+            <select id="fTimeFormat">
+              <option value="">自动</option>
+              <option value="ms">毫秒时间戳</option>
+              <option value="s">秒时间戳</option>
+            </select>
+          </label>
+        </div>
+        <div class="row two">
+          <label class="field">
+            <span>链接路径</span>
+            <input type="text" id="fLinkPath" placeholder="info.jump_url" spellcheck="false" />
+          </label>
+          <label class="field">
+            <span>链接模板（可空）</span>
+            <input type="text" id="fLinkTemplate" placeholder="https://.../{id}" spellcheck="false" />
+          </label>
+        </div>
+        <label class="field">
+          <span>图片路径（可空）</span>
+          <input type="text" id="fImagesPath" placeholder="image.urls" spellcheck="false" />
+        </label>
+      </div>
+
+      <label class="field">
+        <span>附加请求头（JSON，可空）</span>
+        <textarea id="fHeaders" rows="2" spellcheck="false" placeholder='{"Referer":"https://..."}'></textarea>
+      </label>
+      </details>
+
+      <div class="form-actions">
+        <button id="saveMonitor" class="primary" type="button">保存并检查</button>
+        <button id="testMonitor" class="ghost" type="button">测试解析</button>
+        <button id="cancelForm" class="ghost" type="button">取消</button>
+      </div>
+      <pre id="testResult" class="test-result hidden"></pre>
+    </section>
+
+    <div class="settings-grid">
+      <section class="panel" aria-labelledby="generalHeading">
+        <div class="section-head compact">
+          <div>
+            <p class="eyebrow">GENERAL</p>
+            <h2 id="generalHeading">常规设置</h2>
+            <p class="section-description">配置新动态提醒、默认检查间隔与监控数据迁移。</p>
+          </div>
+        </div>
+        <div class="switch-group vertical">
+          <label class="switch-line">
+            <input type="checkbox" id="sPageToast" />
+            <span>在页面上弹出提示</span>
+          </label>
+          <label class="switch-line">
+            <input type="checkbox" id="sSystemNotification" />
+            <span>页面未打开时发系统通知</span>
+          </label>
+        </div>
+        <div class="row two">
+          <label class="field">
+            <span>提示停留（秒）</span>
+            <input type="number" id="sToastDuration" min="5" max="120" step="1" />
+          </label>
+          <label class="field">
+            <span>默认间隔（秒）</span>
+            <input type="number" id="sInterval" min="60" max="86400" step="60" />
+          </label>
+        </div>
+        <div class="form-actions">
+          <button id="saveSettings" class="primary" type="button">保存常规设置</button>
+        </div>
+        <div class="data-actions">
+          <h3>监控数据</h3>
+          <p class="hint">导入支持监控项数组或包含 monitors 的对象；导出只包含监控配置，不包含 AI API Key。</p>
+          <div class="form-actions">
+            <button id="exportMonitors" class="ghost" type="button">导出监控项</button>
+            <button id="importMonitors" class="ghost" type="button">导入监控项</button>
+            <input type="file" id="importFile" accept=".json,application/json" hidden />
+          </div>
+        </div>
+        <p class="hint footer-hint">提示与通知只在发现新动态时触发；首次添加仅建立基线，不提示历史内容。</p>
+      </section>
+
+      <section class="panel" aria-labelledby="aiHeading">
+        <div class="section-head compact">
+          <div>
+            <p class="eyebrow">AI SUMMARY</p>
+            <h2 id="aiHeading">AI 概览</h2>
+            <p class="section-description">连接 OpenAI 兼容的模型服务，为新动态生成简明中文概览。</p>
+          </div>
+        </div>
+        <label class="switch-line featured-switch">
+          <input type="checkbox" id="sAiEnabled" />
+          <span>启用 AI 概览</span>
+        </label>
+        <label class="field">
+          <span>Base URL</span>
+          <input type="url" id="sAiBaseUrl" placeholder="https://api.openai.com/v1" spellcheck="false" autocomplete="off" />
+        </label>
+        <label class="field">
+          <span>API Key</span>
+          <input type="password" id="sAiApiKey" placeholder="sk-..." spellcheck="false" autocomplete="off" />
+        </label>
+        <label class="field">
+          <span>Model</span>
+          <input type="text" id="sAiModel" placeholder="例如：gpt-4o-mini" spellcheck="false" autocomplete="off" />
+        </label>
+        <div class="privacy-note">
+          <strong>隐私提示</strong>
+          <p>启用自动生成或手动生成后，动态标题与正文会发送给你配置的第三方模型服务。不会发送图片、Cookie 或监控请求头。API Key 仅保存在本机扩展存储中，导出监控项不会包含它。</p>
+        </div>
+        <div class="form-actions">
+          <button id="saveAiSettings" class="primary" type="button">保存 AI 配置</button>
+          <button id="testAiConnection" class="ghost" type="button">测试连接</button>
+        </div>
+        <p id="aiTestResult" class="inline-status hidden" role="status" aria-live="polite"></p>
+      </section>
+    </div>
+  </main>
+
+  <footer class="footer">
+    <div class="footer-inner">后台每分钟检查一次到期项目；同花顺等页面内接口建议保持目标页面打开。</div>
+  </footer>
+
+  <script type="module" src="settings.js"></script>
+</body>
+</html>

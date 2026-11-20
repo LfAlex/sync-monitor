@@ -1,23 +1,8 @@
-/**
- * Sync Monitor · 弹窗界面
- */
-
-const TYPE_LABELS = {
-  auto: '自动识别',
-  rss: 'RSS',
-  html: 'HTML',
-  json: 'JSON',
-  pageapi: '页面接口'
-};
-
+const MAX_RECENT_ITEMS = 5;
 const $ = (id) => document.getElementById(id);
 
 let state = { monitors: [], results: {}, settings: {} };
-let editingId = null;
-
-/* ------------------------------------------------------------------ */
-/* 工具                                                                */
-/* ------------------------------------------------------------------ */
+let checkingAll = false;
 
 async function send(type, payload = {}) {
   const response = await chrome.runtime.sendMessage({ type, ...payload });
@@ -26,603 +11,185 @@ async function send(type, payload = {}) {
   return response;
 }
 
-function el(tag, className, text) {
-  const node = document.createElement(tag);
-  if (className) node.className = className;
-  if (text != null) node.textContent = text;
-  return node;
+function timestamp(value, fallback = 0) {
+  if (typeof value === 'number' && Number.isFinite(value)) return value;
+  const parsed = Date.parse(value || '');
+  return Number.isFinite(parsed) ? parsed : fallback;
 }
 
-function relativeTime(timestamp) {
-  if (!timestamp) return '尚未检查';
-  const diff = Date.now() - timestamp;
+function relativeTime(value) {
+  const time = timestamp(value);
+  if (!time) return '';
+  const diff = Math.max(0, Date.now() - time);
   if (diff < 60 * 1000) return '刚刚';
   if (diff < 60 * 60 * 1000) return `${Math.floor(diff / 60000)} 分钟前`;
   if (diff < 24 * 60 * 60 * 1000) return `${Math.floor(diff / 3600000)} 小时前`;
   return `${Math.floor(diff / 86400000)} 天前`;
 }
 
-function intervalText(seconds) {
-  if (seconds % 60 === 0) return `${seconds / 60} 分钟`;
-  return `${seconds} 秒`;
-}
-
-function safeUrl(value) {
-  try {
-    const url = new URL(value);
-    return url.protocol === 'http:' || url.protocol === 'https:' ? url.toString() : '';
-  } catch {
-    return '';
-  }
-}
-
-function parseJsonField(value, label) {
-  const text = String(value || '').trim();
-  if (!text) return null;
-  try {
-    return JSON.parse(text);
-  } catch {
-    throw new Error(`${label} 不是合法 JSON`);
-  }
-}
-
-/* ------------------------------------------------------------------ */
-/* 渲染                                                                */
-/* ------------------------------------------------------------------ */
-
-function render() {
-  const list = $('list');
-  list.textContent = '';
-  const unread = Object.values(state.results).reduce((sum, item) => sum + (item.unread || 0), 0);
-  $('subtitle').textContent = state.monitors.length
-    ? `${state.monitors.length} 个监控项${unread ? ` · ${unread} 条未读` : ''}`
-    : '还没有监控项';
-  $('emptyTip').classList.toggle('hidden', state.monitors.length > 0);
-  $('checkAll').disabled = state.monitors.length === 0;
-
-  for (const monitor of state.monitors) {
-    list.appendChild(renderCard(monitor, state.results[monitor.id] || {}));
-  }
-}
-
-function renderCard(monitor, result) {
-  const card = el('article', 'card');
-
-  const head = el('div', 'card-head');
-  const titleWrap = el('div', 'card-title');
-  titleWrap.appendChild(el('h3', null, monitor.name));
-
-  const href = safeUrl(monitor.url);
-  if (href) {
-    const link = el('a', 'card-url', href);
-    link.href = href;
-    link.target = '_blank';
-    link.rel = 'noreferrer noopener';
-    titleWrap.appendChild(link);
-  } else {
-    titleWrap.appendChild(el('span', 'card-url', monitor.url));
-  }
-
-  const typeBadge = el('span', 'badge', TYPE_LABELS[monitor.type] || monitor.type);
-  const toggle = el('button', `toggle${monitor.enabled ? ' on' : ''}`);
-  toggle.type = 'button';
-  toggle.title = monitor.enabled ? '点击暂停' : '点击启用';
-  toggle.addEventListener('click', async () => {
-    toggle.disabled = true;
-    try {
-      const next = await send('UPDATE_MONITOR', { monitor: { ...monitor, enabled: !monitor.enabled } });
-      state = next;
-      render();
-    } catch (error) {
-      toggle.disabled = false;
-      alert(error.message);
-    }
-  });
-
-  head.append(titleWrap, typeBadge, toggle);
-
-  const status = el('div', 'status');
-  status.appendChild(el('span', null, `上次：${relativeTime(result.lastCheckAt)}`));
-  status.appendChild(el('span', null, `间隔：${intervalText(monitor.intervalSec)}`));
-  status.appendChild(el('span', null, `采集：${result.mode || '—'}`));
-  if (result.unread) status.appendChild(el('span', 'new', `新动态 +${result.unread}`));
-  if (result.lastCount) status.appendChild(el('span', null, `本次 ${result.lastCount} 条`));
-  if (result.lastError) status.appendChild(el('span', 'error', result.lastError));
-  else if (result.warnings && result.warnings.length) status.appendChild(el('span', 'warn', result.warnings[0]));
-  if (!result.initialized) status.appendChild(el('span', 'warn', '等待首次基线检查'));
-
-  card.append(head, status);
-
-  const previewItems = (result.recentNew || []).slice(0, 3);
-  if (previewItems.length) {
-    const preview = el('div', 'preview');
-    for (const item of previewItems) {
-      // 点击动态进入扩展内的单条详情页（全文 + 图片），原文链接在详情页里
-      const row = el('a');
-      row.href = '#';
-      row.title = '查看完整内容';
-      row.addEventListener('click', (event) => {
-        event.preventDefault();
-        void send('OPEN_DETAIL', { id: monitor.id, key: item.key });
-      });
-      if (item.time) row.appendChild(el('span', 'time', item.time));
-      const text = item.content || item.title || '';
-      row.appendChild(document.createTextNode(text.length > 40 ? `${text.slice(0, 40)}…` : text));
-      preview.appendChild(row);
-    }
-    card.appendChild(preview);
-  }
-
-  const actions = el('div', 'card-actions');
-  const checkButton = el('button', 'ghost small', '立即检查');
-  checkButton.type = 'button';
-  checkButton.addEventListener('click', async () => {
-    checkButton.disabled = true;
-    checkButton.textContent = '检查中…';
-    try {
-      const next = await send('CHECK_MONITOR', { id: monitor.id });
-      state = next;
-      render();
-      const result = next.result || {};
-      if (!result.ok) alert(result.message || '检查失败');
-      else if (result.baseline) alert(result.message || '已建立基线');
-      else alert(result.message || '检查完成');
-    } catch (error) {
-      checkButton.disabled = false;
-      checkButton.textContent = '立即检查';
-      alert(error.message);
-    }
-  });
-
-  const editButton = el('button', 'ghost small', '编辑');
-  editButton.type = 'button';
-  editButton.addEventListener('click', () => openForm(monitor));
-
-  const deleteButton = el('button', 'ghost small danger', '删除');
-  deleteButton.type = 'button';
-  deleteButton.addEventListener('click', async () => {
-    if (!confirm(`确定删除“${monitor.name}”？`)) return;
-    try {
-      state = await send('DELETE_MONITOR', { id: monitor.id });
-      if (editingId === monitor.id) closeForm();
-      render();
-    } catch (error) {
-      alert(error.message);
-    }
-  });
-
-  const detailButton = el('button', 'ghost small', '详情');
-  detailButton.type = 'button';
-  detailButton.addEventListener('click', () => send('OPEN_DETAIL', { id: monitor.id }));
-
-  actions.append(checkButton, detailButton, editButton, deleteButton);
-  card.appendChild(actions);
-  return card;
-}
-
-/* ------------------------------------------------------------------ */
-/* 表单                                                                */
-/* ------------------------------------------------------------------ */
-
-function updateAdvancedVisibility() {
-  const type = $('fType').value;
-  $('advPageapi').classList.toggle('hidden', type !== 'pageapi');
-  $('advHtml').classList.toggle('hidden', type !== 'html');
-  $('advJson').classList.toggle('hidden', !(type === 'json' || type === 'pageapi'));
-}
-
-function fillJsonDefaults() {
-  if (!$('fListPath').value) $('fListPath').value = 'data.list';
-  if (!$('fIdPath').value) $('fIdPath').value = 'id';
-  if (!$('fContentPath').value) $('fContentPath').value = 'content';
-}
-
-function openForm(monitor = null) {
-  closeQuickAdd();
-  editingId = monitor ? monitor.id : null;
-  $('formTitle').textContent = monitor ? '编辑监控项' : '添加监控项';
-  $('fId').value = monitor ? monitor.id : '';
-  $('fName').value = monitor ? monitor.name : '';
-  $('fUrl').value = monitor ? monitor.url : '';
-  $('fType').value = monitor ? monitor.type : 'auto';
-  $('fInterval').value = monitor ? monitor.intervalSec : (state.settings.defaultIntervalSec || 300);
-  $('fEnabled').checked = monitor ? monitor.enabled !== false : true;
-  $('fNote').value = monitor ? monitor.note || '' : '';
-
-  const html = (monitor && monitor.html) || {};
-  $('fItemSelector').value = html.itemSelector || '';
-  $('fTitleSelector').value = html.titleSelector || '';
-  $('fLinkSelector').value = html.linkSelector || '';
-  $('fTimeSelector').value = html.timeSelector || '';
-  $('fContentSelector').value = html.contentSelector || '';
-  $('fRenderTab').checked = monitor ? monitor.render === 'tab' : false;
-
-  const json = (monitor && monitor.json) || {};
-  $('fListPath').value = json.listPath || '';
-  $('fIdPath').value = json.idPath || '';
-  $('fTitlePath').value = json.titlePath || '';
-  $('fContentPath').value = json.contentPath || '';
-  $('fTimePath').value = json.timePath || '';
-  $('fTimeFormat').value = json.timeFormat || '';
-  $('fLinkPath').value = json.linkPath || '';
-  $('fLinkTemplate').value = json.linkTemplate || '';
-  $('fImagesPath').value = json.imagesPath || '';
-
-  const pageapi = (monitor && monitor.pageapi) || {};
-  $('fPageUrl').value = pageapi.pageUrl || '';
-  $('fApiUrl').value = pageapi.url || '';
-  $('fApiMethod').value = pageapi.method || 'POST';
-  $('fApiBody').value = pageapi.body ? JSON.stringify(pageapi.body, null, 2) : '';
-
-  const requestHeaders = monitor && monitor.type === 'pageapi' ? pageapi.headers : monitor && monitor.headers;
-  $('fHeaders').value = requestHeaders && Object.keys(requestHeaders).length
-    ? JSON.stringify(requestHeaders, null, 2)
-    : '';
-
-  $('testResult').classList.add('hidden');
-  $('testResult').textContent = '';
-  updateAdvancedVisibility();
-  if ($('fType').value === 'json') fillJsonDefaults();
-  $('formPanel').classList.remove('hidden');
-  $('formPanel').scrollIntoView({ behavior: 'smooth', block: 'start' });
-}
-
-function closeForm() {
-  editingId = null;
-  $('formPanel').classList.add('hidden');
-}
-
-function collectForm() {
-  const url = $('fUrl').value.trim();
-  if (!url) throw new Error('请填写主页地址');
-  const type = $('fType').value;
-  const monitor = {
-    id: editingId || undefined,
-    name: $('fName').value.trim(),
-    url,
-    type,
-    enabled: $('fEnabled').checked,
-    intervalSec: Number($('fInterval').value) || 300,
-    note: $('fNote').value.trim(),
-    headers: parseJsonField($('fHeaders').value, '附加请求头') || {},
-    html: {
-      itemSelector: $('fItemSelector').value.trim(),
-      titleSelector: $('fTitleSelector').value.trim(),
-      linkSelector: $('fLinkSelector').value.trim(),
-      timeSelector: $('fTimeSelector').value.trim(),
-      contentSelector: $('fContentSelector').value.trim()
-    },
-    render: $('fRenderTab').checked ? 'tab' : 'fetch',
-    json: {
-      listPath: $('fListPath').value.trim() || 'data.list',
-      idPath: $('fIdPath').value.trim(),
-      titlePath: $('fTitlePath').value.trim(),
-      contentPath: $('fContentPath').value.trim(),
-      timePath: $('fTimePath').value.trim(),
-      timeFormat: $('fTimeFormat').value,
-      linkPath: $('fLinkPath').value.trim(),
-      linkTemplate: $('fLinkTemplate').value.trim(),
-      imagesPath: $('fImagesPath').value.trim()
-    },
-    rss: {}
-  };
-
-  if (type === 'pageapi') {
-    const apiUrl = $('fApiUrl').value.trim();
-    if (!apiUrl) throw new Error('页面接口模式需要填写接口地址');
-    monitor.pageapi = {
-      pageUrl: $('fPageUrl').value.trim() || url,
-      url: apiUrl,
-      method: $('fApiMethod').value,
-      headers: monitor.headers,
-      body: parseJsonField($('fApiBody').value, '请求体')
-    };
-  }
-  return monitor;
-}
-
-function applyThsPreset() {
-  const url = $('fUrl').value.trim();
-  const match = url.match(/user_code=([\w]+)/);
-  if (!match) {
-    alert('请先在“主页地址”里填入包含 user_code 的同花顺主页地址');
+function renderCheckStatus() {
+  const status = $('checkStatus');
+  if (checkingAll) {
+    status.textContent = '正在检查…';
+    status.removeAttribute('title');
     return;
   }
-  const code = match[1];
-  const pageUrl = `https://t.10jqka.com.cn/lgt/user_page/?user_code=${code}`;
-  $('fUrl').value = pageUrl;
-  if (!$('fName').value.trim()) $('fName').value = '同花顺 · 主页动态';
-  $('fType').value = 'pageapi';
-  $('fInterval').value = 300;
-  $('fPageUrl').value = pageUrl;
-  $('fApiUrl').value = '/user_center/open/api/content/v2/get_by_uid';
-  $('fApiMethod').value = 'POST';
-  $('fApiBody').value = JSON.stringify({ user_code: code }, null, 2);
-  $('fHeaders').value = JSON.stringify({ 'Content-Type': 'application/json' }, null, 2);
-  $('fListPath').value = 'data.contents';
-  $('fIdPath').value = 'info.id';
-  $('fTitlePath').value = '';
-  $('fContentPath').value = 'abstract.content';
-  $('fTimePath').value = 'info.ctime';
-  $('fTimeFormat').value = 'ms';
-  $('fLinkPath').value = 'info.jump_url';
-  $('fLinkTemplate').value = '';
-  $('fImagesPath').value = 'image.urls';
-  updateAdvancedVisibility();
+  const lastCheckAt = Object.values(state.results).reduce(
+    (latest, result) => Math.max(latest, timestamp(result.lastCheckAt)),
+    0
+  );
+  status.textContent = lastCheckAt ? `${relativeTime(lastCheckAt)}检查过` : '尚未检查';
+  status.title = lastCheckAt ? `最近检查：${new Date(lastCheckAt).toLocaleString('zh-CN', { hour12: false })}` : '';
 }
 
-function buildQuickThsMonitor(code) {
-  const pageUrl = `https://t.10jqka.com.cn/lgt/user_page/?user_code=${code}`;
-  const template = state.monitors.find((monitor) => monitor.type === 'pageapi'
-    && monitor.pageapi && monitor.pageapi.url === '/user_center/open/api/content/v2/get_by_uid');
-  if (template) {
-    const { id, createdAt, name, url, headers, json, pageapi, ...rest } = template;
-    return {
-      ...rest,
-      name: `同花顺 · ${code}`,
-      url: pageUrl,
-      enabled: true,
-      headers: { ...(headers || {}) },
-      json: { ...(json || {}) },
-      pageapi: {
-        ...pageapi,
-        pageUrl,
-        headers: { ...(pageapi.headers || {}) },
-        body: { user_code: code }
-      }
-    };
-  }
-  return {
-    name: `同花顺 · ${code}`,
-    url: pageUrl,
-    type: 'pageapi',
-    enabled: true,
-    intervalSec: state.settings.defaultIntervalSec || 300,
-    pageapi: {
-      pageUrl,
-      url: '/user_center/open/api/content/v2/get_by_uid',
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: { user_code: code }
-    },
-    json: {
-      listPath: 'data.contents',
-      idPath: 'info.id',
-      titlePath: '',
-      contentPath: 'abstract.content',
-      imagesPath: 'image.urls',
-      timePath: 'info.ctime',
-      timeFormat: 'ms',
-      linkPath: 'info.jump_url',
-      itemLimit: 30
+function excerpt(text, max = 120) {
+  const value = String(text || '').replace(/\s+/g, ' ').trim();
+  return value.length > max ? `${value.slice(0, max)}…` : value;
+}
+
+function recentItems() {
+  const items = [];
+  const seen = new Set();
+  for (const monitor of state.monitors) {
+    const result = state.results[monitor.id] || {};
+    for (const item of result.recentNew || []) {
+      const dedupeKey = `${monitor.id}:${item.key}`;
+      if (seen.has(dedupeKey)) continue;
+      seen.add(dedupeKey);
+      items.push({
+        item,
+        monitor,
+        discoveredAt: timestamp(item.discoveredAt, result.lastNewAt || 0)
+      });
     }
-  };
+  }
+  return items
+    .sort((a, b) => b.discoveredAt - a.discoveredAt)
+    .slice(0, MAX_RECENT_ITEMS);
 }
 
-function closeQuickAdd() {
-  $('quickAddPanel').classList.add('hidden');
+function openItem(monitorId, key) {
+  void send('OPEN_DETAIL', { id: monitorId, key }).catch(showError);
 }
 
-function openQuickAdd() {
-  closeForm();
-  $('quickUserId').value = '';
-  $('quickAddPanel').classList.remove('hidden');
-  $('quickAddPanel').scrollIntoView({ behavior: 'smooth', block: 'start' });
-  $('quickUserId').focus();
+function renderItem({ item, monitor }) {
+  const node = $('itemTemplate').content.firstElementChild.cloneNode(true);
+  const summary = item.aiSummary && item.aiSummary.status === 'ready'
+    ? item.aiSummary.text
+    : '';
+  const title = item.title || excerpt(item.content, 80) || '无标题动态';
+  const preview = excerpt(summary || item.content || item.title);
+
+  node.querySelector('.source').textContent = monitor.name || monitor.url;
+  node.querySelector('.time').textContent = item.time || relativeTime(item.discoveredAt);
+  node.querySelector('.news-title').textContent = title;
+  const content = node.querySelector('.news-content');
+  content.textContent = preview === title ? '' : preview;
+  node.querySelector('.ai-badge').classList.toggle('hidden', !summary);
+  node.setAttribute('aria-label', `阅读来自 ${monitor.name} 的动态：${title}`);
+  node.addEventListener('click', () => openItem(monitor.id, item.key));
+  node.addEventListener('keydown', (event) => {
+    if (event.key !== 'Enter' && event.key !== ' ') return;
+    event.preventDefault();
+    openItem(monitor.id, item.key);
+  });
+  return node;
 }
 
-/* ------------------------------------------------------------------ */
-/* 设置                                                                */
-/* ------------------------------------------------------------------ */
+function render() {
+  renderCheckStatus();
+  const items = recentItems();
+  const unread = Object.values(state.results).reduce((sum, result) => sum + (result.unread || 0), 0);
+  $('subtitle').textContent = state.monitors.length
+    ? `${state.monitors.length} 个监控项${unread ? ` · ${unread} 条未读` : ''}`
+    : '主页动态监控';
+  $('unreadSummary').textContent = unread ? `共 ${unread} 条未读，当前展示最近 ${items.length} 条` : '没有未读动态';
+  $('markRead').disabled = !unread;
+  $('checkAll').disabled = state.monitors.length === 0;
+  $('openAll').disabled = state.monitors.length === 0;
 
-function fillSettings() {
-  const settings = state.settings || {};
-  $('sPageToast').checked = settings.pageToast !== false;
-  $('sSystemNotification').checked = settings.systemNotification !== false;
-  $('sToastDuration').value = settings.toastDurationSec || 25;
-  $('sInterval').value = settings.defaultIntervalSec || 300;
+  const list = $('list');
+  list.textContent = '';
+  for (const entry of items) list.appendChild(renderItem(entry));
+
+  const empty = !items.length;
+  $('emptyTip').classList.toggle('hidden', !empty);
+  if (empty) {
+    const hasMonitors = state.monitors.length > 0;
+    $('emptyTitle').textContent = hasMonitors ? '暂无新动态' : '还没有监控项';
+    $('emptyText').textContent = hasMonitors
+      ? '发现新内容后，会在这里显示最近几条。'
+      : '先在独立设置页添加需要关注的主页或信息源。';
+  }
 }
 
-async function loadState() {
-  state = await send('GET_STATE');
-  render();
-  fillSettings();
-  if (state.monitors.length === 0) $('emptyTip').classList.remove('hidden');
+function showError(error) {
+  $('feedback').textContent = String((error && error.message) || error);
+  $('feedback').classList.remove('hidden');
 }
 
-/* ------------------------------------------------------------------ */
-/* 事件绑定                                                            */
-/* ------------------------------------------------------------------ */
+async function openSettings() {
+  try {
+    await send('OPEN_SETTINGS');
+  } catch (error) {
+    showError(error);
+  }
+}
 
+$('openSettings').addEventListener('click', openSettings);
+$('emptyAction').addEventListener('click', openSettings);
+$('openAll').addEventListener('click', () => {
+  void send('OPEN_DETAIL').catch(showError);
+});
 $('checkAll').addEventListener('click', async () => {
   const button = $('checkAll');
+  checkingAll = true;
+  renderCheckStatus();
   button.disabled = true;
   button.textContent = '检查中…';
   try {
-    const next = await send('CHECK_ALL_MONITORS');
-    state = next;
+    state = await send('CHECK_ALL_MONITORS');
     render();
-    const checks = next.checks || [];
-    const failed = checks.filter((item) => !item.result || item.result.ok === false);
+    const failed = (state.checks || []).filter((entry) => !entry.result || entry.result.ok === false);
     if (failed.length) {
-      const details = failed.map((item) => {
-        const monitor = next.monitors.find((entry) => entry.id === item.id);
-        const message = (item.result && item.result.message) || '正在检查中，请稍后重试';
-        return `${monitor ? monitor.name : item.id}：${message}`;
-      }).join('\n');
-      alert(`检查完成：${checks.length - failed.length} 个成功，${failed.length} 个失败\n${details}`);
-    } else {
-      alert(`已检查 ${checks.length} 个监控项，全部成功`);
+      const details = failed.map((entry) => {
+        const monitor = state.monitors.find((item) => item.id === entry.id);
+        return `${monitor ? monitor.name : entry.id}：${(entry.result && entry.result.message) || '正在检查中，请稍后重试'}`;
+      });
+      throw new Error(details.join('\n'));
     }
+    $('feedback').classList.add('hidden');
   } catch (error) {
-    alert(error.message);
+    showError(error);
   } finally {
+    checkingAll = false;
+    renderCheckStatus();
     button.disabled = state.monitors.length === 0;
-    button.textContent = '立即检查';
-  }
-});
-
-$('showForm').addEventListener('click', openQuickAdd);
-$('cancelQuickAdd').addEventListener('click', closeQuickAdd);
-$('advancedAdd').addEventListener('click', () => {
-  const code = $('quickUserId').value.trim();
-  openForm();
-  if (/^[\w]+$/.test(code)) {
-    $('fUrl').value = `https://t.10jqka.com.cn/lgt/user_page/?user_code=${code}`;
-    applyThsPreset();
-  }
-});
-$('saveQuickMonitor').addEventListener('click', async () => {
-  const button = $('saveQuickMonitor');
-  button.disabled = true;
-  try {
-    const code = $('quickUserId').value.trim();
-    if (!/^[\w]+$/.test(code)) throw new Error('请输入正确的同花顺用户 ID');
-    const result = await send('ADD_MONITOR', { monitor: buildQuickThsMonitor(code) });
-    state = result;
-    render();
-    fillSettings();
-    closeQuickAdd();
-    const check = result.check || {};
-    if (check.ok && check.baseline) alert('已保存，并建立基线（不会提示历史动态）');
-    else if (check && check.ok === false) alert(`已保存，但首次检查失败：${check.message}`);
-  } catch (error) {
-    alert(error.message);
-  } finally {
-    button.disabled = false;
-  }
-});
-$('quickUserId').addEventListener('keydown', (event) => {
-  if (event.key === 'Enter') $('saveQuickMonitor').click();
-});
-$('cancelForm').addEventListener('click', closeForm);
-$('fType').addEventListener('change', updateAdvancedVisibility);
-$('thsPreset').addEventListener('click', applyThsPreset);
-
-$('saveMonitor').addEventListener('click', async () => {
-  const button = $('saveMonitor');
-  button.disabled = true;
-  try {
-    const monitor = collectForm();
-    const result = editingId
-      ? await send('UPDATE_MONITOR', { monitor: { ...monitor, id: editingId } })
-      : await send('ADD_MONITOR', { monitor });
-    state = result;
-    render();
-    fillSettings();
-    closeForm();
-    const check = result.check || {};
-    if (check.ok && check.baseline) alert('已保存，并建立基线（不会提示历史动态）');
-    else if (check && check.ok === false) alert(`已保存，但首次检查失败：${check.message}`);
-  } catch (error) {
-    alert(error.message);
-  } finally {
-    button.disabled = false;
-  }
-});
-
-$('testMonitor').addEventListener('click', async () => {
-  const button = $('testMonitor');
-  const output = $('testResult');
-  button.disabled = true;
-  button.textContent = '测试中…';
-  try {
-    const monitor = collectForm();
-    const result = await send('TEST_MONITOR', { monitor });
-    output.classList.remove('hidden');
-    const lines = [
-      `采集方式：${result.mode}`,
-      `条目数量：${result.total}`,
-      ...(result.warnings || []).map((item) => `提示：${item}`),
-      '',
-      ...result.items.map((item, index) => `${index + 1}. [${item.time || '无时间'}] ${item.content || item.title}\n   ${item.link}`)
-    ];
-    output.textContent = lines.join('\n');
-  } catch (error) {
-    output.classList.remove('hidden');
-    output.textContent = `测试失败：${error.message}`;
-  } finally {
-    button.disabled = false;
-    button.textContent = '测试解析';
-  }
-});
-
-$('toggleSettings').addEventListener('click', () => {
-  $('settingsPanel').classList.toggle('hidden');
-  fillSettings();
-});
-
-$('saveSettings').addEventListener('click', async () => {
-  try {
-    state = await send('SAVE_SETTINGS', {
-      settings: {
-        pageToast: $('sPageToast').checked,
-        systemNotification: $('sSystemNotification').checked,
-        toastDurationSec: Number($('sToastDuration').value) || 25,
-        defaultIntervalSec: Math.max(60, Number($('sInterval').value) || 300)
-      }
-    });
-    render();
-    alert('设置已保存');
-  } catch (error) {
-    alert(error.message);
+    button.textContent = '全部检查';
   }
 });
 
 $('markRead').addEventListener('click', async () => {
+  $('markRead').disabled = true;
   try {
     state = await send('MARK_ALL_READ');
+    $('feedback').classList.add('hidden');
     render();
   } catch (error) {
-    alert(error.message);
-  }
-});
-
-$('exportMonitors').addEventListener('click', () => {
-  const payload = state.monitors.map((monitor) => ({
-    id: monitor.id,
-    name: monitor.name,
-    url: monitor.url,
-    type: monitor.type,
-    enabled: monitor.enabled,
-    intervalSec: monitor.intervalSec,
-    headers: monitor.headers,
-    browser: monitor.browser,
-    html: monitor.html,
-    json: monitor.json,
-    rss: monitor.rss,
-    pageapi: monitor.pageapi,
-    render: monitor.render,
-    note: monitor.note
-  }));
-  const blob = new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json' });
-  const link = document.createElement('a');
-  link.href = URL.createObjectURL(blob);
-  link.download = 'sync-monitor-monitors.json';
-  link.click();
-  setTimeout(() => URL.revokeObjectURL(link.href), 2000);
-});
-
-$('importMonitors').addEventListener('click', () => $('importFile').click());
-
-$('importFile').addEventListener('change', async (event) => {
-  const file = event.target.files && event.target.files[0];
-  if (!file) return;
-  try {
-    const text = await file.text();
-    const parsed = JSON.parse(text);
-    const monitors = Array.isArray(parsed) ? parsed : parsed.monitors;
-    if (!Array.isArray(monitors)) throw new Error('文件格式不正确，应为监控项数组');
-    state = await send('IMPORT_MONITORS', { monitors });
-    render();
-    alert(`已导入 ${monitors.length} 个监控项`);
-  } catch (error) {
-    alert(`导入失败：${error.message}`);
+    showError(error);
   } finally {
-    event.target.value = '';
+    $('markRead').disabled = false;
   }
 });
 
-loadState().catch((error) => {
-  $('subtitle').textContent = `加载失败：${error.message}`;
-});
+async function boot() {
+  try {
+    state = await send('GET_STATE');
+    render();
+  } catch (error) {
+    showError(error);
+    render();
+  }
+}
+
+void boot();
