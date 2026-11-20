@@ -11,16 +11,20 @@ import { collectItems, normalizeMonitor, DEFAULT_SETTINGS } from './lib/parse.js
 import { generateChineseSummary, testAiConnection } from './lib/ai.js';
 
 const ALARM_NAME = 'sync-monitor-tick';
-const STORAGE_KEYS = ['monitors', 'results', 'settings'];
+const STORAGE_KEYS = ['monitors', 'results', 'settings', 'serverChanQueue'];
+const SERVER_CHAN_BATCH_SIZE = 10;
+const SERVER_CHAN_RETRY_MS = 5 * 60 * 1000;
 
 const memory = {
   monitors: [],
   results: {},
   settings: { ...DEFAULT_SETTINGS },
+  serverChanQueue: { jobs: {}, nextAttemptAt: 0, lastError: '' },
   ready: null
 };
 
 const running = new Set();
+let serverChanFlushing = false;
 
 const PRESET_THS = {
   id: 'ths_1179giyc4jr06d6785e69e',
@@ -90,7 +94,14 @@ async function loadState() {
   memory.settings = {
     ...DEFAULT_SETTINGS,
     ...storedSettings,
-    ai: { ...DEFAULT_SETTINGS.ai, ...(storedSettings.ai || {}) }
+    ai: { ...DEFAULT_SETTINGS.ai, ...(storedSettings.ai || {}) },
+    serverChan: { ...DEFAULT_SETTINGS.serverChan, ...(storedSettings.serverChan || {}) }
+  };
+  const queue = data.serverChanQueue || {};
+  memory.serverChanQueue = {
+    jobs: queue.jobs && typeof queue.jobs === 'object' ? queue.jobs : {},
+    nextAttemptAt: Number(queue.nextAttemptAt) || 0,
+    lastError: String(queue.lastError || '')
   };
 
   // 旧版存量配置可能缺少图片字段、页面接口请求体或 JSON 请求头，启动时一并修复
@@ -110,7 +121,8 @@ async function saveState() {
   await chrome.storage.local.set({
     monitors: memory.monitors,
     results: memory.results,
-    settings: memory.settings
+    settings: memory.settings,
+    serverChanQueue: memory.serverChanQueue
   });
 }
 
@@ -425,6 +437,136 @@ chrome.notifications.onClicked.addListener(async (notificationId) => {
 });
 
 /* ------------------------------------------------------------------ */
+/* Server 酱未读延时通知                                               */
+/* ------------------------------------------------------------------ */
+
+function normalizedServerChan(raw) {
+  const config = raw || {};
+  return {
+    enabled: config.enabled === true,
+    sendKey: String(config.sendKey || '').trim(),
+    delayMin: Math.max(1, Math.min(10080, Number(config.delayMin) || 60))
+  };
+}
+
+function serverChanJobKey(monitorId, itemKey) {
+  return `${monitorId}:${itemKey}`;
+}
+
+function enqueueServerChan(monitor, items) {
+  const config = normalizedServerChan(memory.settings.serverChan);
+  if (!config.enabled) return;
+  for (const item of items) {
+    const discoveredAt = item.discoveredAt || Date.now();
+    const excerpt = String(item.content || item.title || '（无正文）').slice(0, 200);
+    memory.serverChanQueue.jobs[serverChanJobKey(monitor.id, item.key)] = {
+      monitorId: monitor.id,
+      itemKey: item.key,
+      monitorName: monitor.name || monitor.url,
+      title: String(item.title || excerpt).slice(0, 120),
+      excerpt,
+      link: item.link || monitor.url,
+      discoveredAt,
+      dueAt: discoveredAt + config.delayMin * 60 * 1000
+    };
+  }
+}
+
+function cancelServerChanJobs(predicate) {
+  for (const [key, job] of Object.entries(memory.serverChanQueue.jobs)) {
+    if (predicate(job, key)) delete memory.serverChanQueue.jobs[key];
+  }
+}
+
+function rescheduleServerChanJobs(delayMin) {
+  for (const job of Object.values(memory.serverChanQueue.jobs)) {
+    job.dueAt = job.discoveredAt + delayMin * 60 * 1000;
+  }
+}
+
+function safeServerChanError(error, sendKey) {
+  let message = String((error && error.message) || error || '未知错误');
+  if (sendKey) message = message.split(sendKey).join('***');
+  return message;
+}
+
+async function postServerChan(rawConfig, title, desp) {
+  const config = normalizedServerChan(rawConfig);
+  if (!config.sendKey) throw new Error('请填写 Server 酱 SendKey');
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), 20000);
+  try {
+    const response = await fetch(`https://sctapi.ftqq.com/${encodeURIComponent(config.sendKey)}.send`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/x-www-form-urlencoded;charset=UTF-8',
+        Accept: 'application/json'
+      },
+      body: new URLSearchParams({ title, desp }),
+      signal: controller.signal
+    });
+    const text = await response.text();
+    let payload = {};
+    try {
+      payload = JSON.parse(text);
+      if (!payload || typeof payload !== 'object') payload = {};
+    } catch {
+      if (response.ok) throw new Error('Server 酱返回了非 JSON 响应');
+    }
+    const detail = String(payload.message || payload.error || '').trim();
+    if (!response.ok) throw new Error(`Server 酱 HTTP ${response.status}${detail ? `：${detail}` : ''}`);
+    if (payload.code !== 0) throw new Error(detail || `Server 酱返回错误码 ${payload.code}`);
+    return payload;
+  } catch (error) {
+    throw new Error(safeServerChanError(error, config.sendKey));
+  } finally {
+    clearTimeout(timeout);
+  }
+}
+
+function serverChanMessage(jobs) {
+  const delayMin = normalizedServerChan(memory.settings.serverChan).delayMin;
+  const title = `Sync Monitor：${jobs.length} 条未读动态（${delayMin} 分钟）`;
+  const desp = jobs.map((job, index) => {
+    const heading = `### ${index + 1}. ${job.monitorName}`;
+    const itemTitle = job.title || job.excerpt || '未命名动态';
+    const linkedTitle = job.link ? `[${itemTitle}](${job.link})` : itemTitle;
+    const discoveredAt = new Date(job.discoveredAt).toLocaleString('zh-CN', { hour12: false });
+    return `${heading}\n${linkedTitle}\n\n${job.excerpt}\n\n发现时间：${discoveredAt}`;
+  }).join('\n\n---\n\n');
+  return { title, desp };
+}
+
+async function flushServerChan() {
+  if (serverChanFlushing) return;
+  const config = normalizedServerChan(memory.settings.serverChan);
+  const queue = memory.serverChanQueue;
+  if (!config.enabled || Date.now() < queue.nextAttemptAt) return;
+  const due = Object.entries(queue.jobs)
+    .filter(([, job]) => job.dueAt <= Date.now())
+    .sort((left, right) => left[1].dueAt - right[1].dueAt);
+  if (!due.length) return;
+
+  serverChanFlushing = true;
+  try {
+    const batch = due.slice(0, SERVER_CHAN_BATCH_SIZE);
+    try {
+      const message = serverChanMessage(batch.map(([, job]) => job));
+      await postServerChan(config, message.title, message.desp);
+      for (const [key] of batch) delete queue.jobs[key];
+      queue.lastError = '';
+      queue.nextAttemptAt = Object.keys(queue.jobs).length ? Date.now() + 60 * 1000 : 0;
+    } catch (error) {
+      queue.lastError = safeServerChanError(error, config.sendKey);
+      queue.nextAttemptAt = Date.now() + SERVER_CHAN_RETRY_MS;
+    }
+    await saveState();
+  } finally {
+    serverChanFlushing = false;
+  }
+}
+
+/* ------------------------------------------------------------------ */
 /* AI 概览                                                             */
 /* ------------------------------------------------------------------ */
 
@@ -524,6 +666,7 @@ async function checkMonitor(monitor, options = {}) {
       next.lastNewAt = Date.now();
       next.unread = (previous.unread || 0) + fresh.length;
       next.recentNew = [...fresh.slice(0, 10), ...(previous.recentNew || [])].slice(0, 20);
+      enqueueServerChan(monitor, fresh);
     }
     memory.results[monitor.id] = next;
     await saveState();
@@ -560,6 +703,7 @@ async function tick() {
     // 串行执行，避免同一时间给目标站点造成压力
     await checkMonitor(monitor);
   }
+  await flushServerChan();
   updateBadge();
 }
 
@@ -609,6 +753,7 @@ const handlers = {
     await ensureReady();
     memory.monitors = memory.monitors.filter((item) => item.id !== message.id);
     delete memory.results[message.id];
+    cancelServerChanJobs((job) => job.monitorId === message.id);
     await saveState();
     updateBadge();
     return statePayload();
@@ -692,6 +837,15 @@ const handlers = {
     return { ok: true, message: '模型连接成功', summary };
   },
 
+  async TEST_SERVER_CHAN_CONNECTION(message) {
+    await ensureReady();
+    const config = message.serverChan || message.config
+      || (message.settings && message.settings.serverChan) || memory.settings.serverChan;
+    await postServerChan(config, 'Sync Monitor 测试消息',
+      `Server 酱连接成功。\n\n发送时间：${new Date().toLocaleString('zh-CN', { hour12: false })}`);
+    return { ok: true, message: '测试消息发送成功' };
+  },
+
   async OPEN_SETTINGS() {
     await chrome.tabs.create({ url: chrome.runtime.getURL('settings/settings.html') });
     return { ok: true };
@@ -700,13 +854,29 @@ const handlers = {
   async SAVE_SETTINGS(message) {
     await ensureReady();
     const incoming = message.settings || {};
+    const previousServerChan = normalizedServerChan(memory.settings.serverChan);
+    const serverChan = normalizedServerChan({
+      ...previousServerChan,
+      ...(incoming.serverChan || {})
+    });
+    if (serverChan.enabled && !serverChan.sendKey) {
+      throw new Error('启用 Server 酱前请填写 SendKey');
+    }
     memory.settings = {
       ...memory.settings,
       ...incoming,
       ai: { ...memory.settings.ai, ...(incoming.ai || {}) },
+      serverChan,
       toastDurationSec: Math.max(5, Math.min(120,
         Number(incoming.toastDurationSec ?? memory.settings.toastDurationSec) || 25))
     };
+    if (!serverChan.enabled) {
+      memory.serverChanQueue.jobs = {};
+      memory.serverChanQueue.nextAttemptAt = 0;
+      memory.serverChanQueue.lastError = '';
+    } else if (serverChan.delayMin !== previousServerChan.delayMin) {
+      rescheduleServerChanJobs(serverChan.delayMin);
+    }
     await saveState();
     return statePayload();
   },
@@ -720,11 +890,33 @@ const handlers = {
     return { ...statePayload(), result: result || { ok: false, message: '正在检查中，请稍后再试' } };
   },
 
+  async MARK_ITEM_READ(message) {
+    await ensureReady();
+    const result = memory.results[message.id];
+    if (result) {
+      const previousUnread = (result.recentNew || []).length;
+      const recentNew = (result.recentNew || []).filter((item) => item.key !== message.key);
+      const readCount = previousUnread - recentNew.length;
+      memory.results[message.id] = {
+        ...result,
+        recentNew,
+        unread: Math.max(0, (result.unread || 0) - readCount)
+      };
+    }
+    cancelServerChanJobs((job) => job.monitorId === message.id && job.itemKey === message.key);
+    await saveState();
+    updateBadge();
+    return statePayload();
+  },
+
   async MARK_ALL_READ() {
     await ensureReady();
     for (const key of Object.keys(memory.results)) {
       memory.results[key] = { ...memory.results[key], unread: 0, recentNew: [] };
     }
+    memory.serverChanQueue.jobs = {};
+    memory.serverChanQueue.nextAttemptAt = 0;
+    memory.serverChanQueue.lastError = '';
     await saveState();
     updateBadge();
     return statePayload();

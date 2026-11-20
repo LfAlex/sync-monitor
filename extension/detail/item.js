@@ -175,6 +175,18 @@ async function boot() {
     state.settings = payload.settings || {};
     locateItem();
     renderItem();
+    if (currentMonitor && currentItem) {
+      try {
+        const readPayload = await send({
+          type: 'MARK_ITEM_READ',
+          id: currentMonitor.id,
+          key: currentItem.key
+        });
+        state.results = readPayload.results || {};
+      } catch {
+        // 已读状态写入失败不影响原文阅读
+      }
+    }
   } catch (error) {
     const empty = document.getElementById('empty');
     empty.hidden = false;

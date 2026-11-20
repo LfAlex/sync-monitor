@@ -264,7 +264,7 @@
         </div>
         <div class="data-actions">
           <h3>监控数据</h3>
-          <p class="hint">导入支持监控项数组或包含 monitors 的对象；导出只包含监控配置，不包含 AI API Key。</p>
+          <p class="hint">导入支持监控项数组或包含 monitors 的对象；导出只包含监控配置，不包含 AI API Key 和 Server 酱 SendKey。</p>
           <div class="form-actions">
             <button id="exportMonitors" class="ghost" type="button">导出监控项</button>
             <button id="importMonitors" class="ghost" type="button">导入监控项</button>
@@ -307,6 +307,37 @@
           <button id="testAiConnection" class="ghost" type="button">测试连接</button>
         </div>
         <p id="aiTestResult" class="inline-status hidden" role="status" aria-live="polite"></p>
+      </section>
+
+      <section class="panel" aria-labelledby="serverChanHeading">
+        <div class="section-head compact">
+          <div>
+            <p class="eyebrow">SERVER CHAN</p>
+            <h2 id="serverChanHeading">Server 酱通知</h2>
+            <p class="section-description">通过 Server 酱推送到期仍未读的动态提醒。</p>
+          </div>
+        </div>
+        <label class="switch-line featured-switch">
+          <input type="checkbox" id="sServerChanEnabled" />
+          <span>启用 Server 酱通知</span>
+        </label>
+        <label class="field">
+          <span>SendKey</span>
+          <input type="password" id="sServerChanSendKey" placeholder="SCT..." spellcheck="false" autocomplete="off" />
+        </label>
+        <label class="field">
+          <span>未读多少分钟后通知</span>
+          <input type="number" id="sServerChanDelayMin" min="1" max="10080" step="1" value="60" />
+        </label>
+        <div class="privacy-note">
+          <strong>隐私提示</strong>
+          <p>到期动态的标题、短摘要和原文链接会发送到 Server 酱；SendKey 仅保存在本机扩展存储中，导出监控项不会包含它。</p>
+        </div>
+        <div class="form-actions">
+          <button id="saveServerChanSettings" class="primary" type="button">保存 Server 酱配置</button>
+          <button id="testServerChanConnection" class="ghost" type="button">发送测试消息</button>
+        </div>
+        <p id="serverChanTestResult" class="inline-status hidden" role="status" aria-live="polite"></p>
       </section>
     </div>
   </main>

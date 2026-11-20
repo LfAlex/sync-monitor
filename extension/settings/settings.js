@@ -14,7 +14,7 @@ const TYPE_LABELS = {
 
 const $ = (id) => document.getElementById(id);
 
-let state = { monitors: [], results: {}, settings: { ai: {} } };
+let state = { monitors: [], results: {}, settings: { ai: {}, serverChan: {} } };
 let editingId = null;
 
 /* ------------------------------------------------------------------ */
@@ -516,7 +516,7 @@ function buildQuickThsMonitor(code) {
 }
 
 /* ------------------------------------------------------------------ */
-/* 常规与 AI 设置                                                      */
+/* 常规、AI 与 Server 酱设置                                            */
 /* ------------------------------------------------------------------ */
 
 function collectAiSettings() {
@@ -528,9 +528,18 @@ function collectAiSettings() {
   };
 }
 
+function collectServerChanSettings() {
+  return {
+    enabled: $('sServerChanEnabled').checked,
+    sendKey: $('sServerChanSendKey').value.trim(),
+    delayMin: clampNumber($('sServerChanDelayMin').value, 60, 1, 10080)
+  };
+}
+
 function fillSettings() {
   const settings = state.settings || {};
   const ai = settings.ai || {};
+  const serverChan = settings.serverChan || {};
   $('sPageToast').checked = settings.pageToast !== false;
   $('sSystemNotification').checked = settings.systemNotification !== false;
   $('sToastDuration').value = settings.toastDurationSec || 25;
@@ -539,6 +548,9 @@ function fillSettings() {
   $('sAiBaseUrl').value = ai.baseUrl || '';
   $('sAiApiKey').value = ai.apiKey || '';
   $('sAiModel').value = ai.model || '';
+  $('sServerChanEnabled').checked = serverChan.enabled === true;
+  $('sServerChanSendKey').value = serverChan.sendKey || '';
+  $('sServerChanDelayMin').value = serverChan.delayMin || 60;
 }
 
 async function saveSettings(button) {
@@ -550,7 +562,8 @@ async function saveSettings(button) {
         systemNotification: $('sSystemNotification').checked,
         toastDurationSec: clampNumber($('sToastDuration').value, 25, 5, 120),
         defaultIntervalSec: clampNumber($('sInterval').value, 300, 60, 86400),
-        ai: collectAiSettings()
+        ai: collectAiSettings(),
+        serverChan: collectServerChanSettings()
       }
     });
     render();
@@ -671,6 +684,7 @@ $('testMonitor').addEventListener('click', async () => {
 
 $('saveSettings').addEventListener('click', () => saveSettings($('saveSettings')));
 $('saveAiSettings').addEventListener('click', () => saveSettings($('saveAiSettings')));
+$('saveServerChanSettings').addEventListener('click', () => saveSettings($('saveServerChanSettings')));
 
 $('testAiConnection').addEventListener('click', async () => {
   const button = $('testAiConnection');
@@ -690,6 +704,27 @@ $('testAiConnection').addEventListener('click', async () => {
   } finally {
     button.disabled = false;
     button.textContent = '测试连接';
+  }
+});
+
+$('testServerChanConnection').addEventListener('click', async () => {
+  const button = $('testServerChanConnection');
+  const output = $('serverChanTestResult');
+  button.disabled = true;
+  button.textContent = '发送中…';
+  output.className = 'inline-status pending';
+  output.textContent = '正在发送测试消息…';
+  try {
+    const result = await send('TEST_SERVER_CHAN_CONNECTION', { serverChan: collectServerChanSettings() });
+    if (result.ok === false) throw new Error(result.message || '测试消息发送失败');
+    output.className = 'inline-status success';
+    output.textContent = result.message || '测试消息发送成功';
+  } catch (error) {
+    output.className = 'inline-status error';
+    output.textContent = `测试失败：${error.message}`;
+  } finally {
+    button.disabled = false;
+    button.textContent = '发送测试消息';
   }
 });
 

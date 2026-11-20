@@ -18,6 +18,11 @@ export const DEFAULT_SETTINGS = {
     baseUrl: 'https://api.openai.com/v1',
     apiKey: '',
     model: ''
+  },
+  serverChan: {
+    enabled: false,
+    sendKey: '',
+    delayMin: 60
   }
 };
 
